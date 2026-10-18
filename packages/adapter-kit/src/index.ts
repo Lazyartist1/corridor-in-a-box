@@ -19,18 +19,29 @@ import {
   type PaymentIntent,
 } from "@corridor/types";
 
-/** A SEP-38 quote. `firm` quotes carry an id + expiry and bind the deliverer to a rate. */
-export interface Quote {
-  readonly id: string;
+export interface BaseQuote {
   /** Dest units per 1 source unit. */
   readonly price: string;
-  /** Epoch ms after which a firm quote is no longer honoured. */
-  readonly expiresAt: number;
   readonly sourceAmount: Money;
   readonly destAmount: Money;
   readonly fee?: Money;
-  readonly firm: boolean;
 }
+
+export interface FirmQuote extends BaseQuote {
+  readonly firm: true;
+  readonly id: string;
+  /** Epoch ms after which a firm quote is no longer honoured. */
+  readonly expiresAt: number;
+}
+
+export interface IndicativeQuote extends BaseQuote {
+  readonly firm: false;
+  readonly id?: string;
+  readonly expiresAt?: number;
+}
+
+/** A SEP-38 quote. `firm` quotes carry an id + expiry and bind the deliverer to a rate. */
+export type Quote = FirmQuote | IndicativeQuote;
 
 export interface KycResult {
   readonly status: "accepted" | "pending" | "rejected";
@@ -530,7 +541,7 @@ export function conformanceSuite(
       name: "quote returns a future expiry",
       run: async () => {
         const q = await adapter.requestQuote(intent, corridor);
-        return q.ok && q.value.expiresAt > Date.now();
+        return q.ok && (q.value.firm ? q.value.expiresAt > Date.now() : true);
       },
     },
     {

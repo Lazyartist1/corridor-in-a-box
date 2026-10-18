@@ -20,14 +20,16 @@ import {
   type Outcome,
   type PaymentIntent,
 } from "@corridor/types";
-import type {
-  AdapterCapabilities,
-  AnchorAdapter,
-  KycResult,
-  OpenTransaction,
-  Quote,
-  RefundRef,
-  TransactionStatus,
+import {
+  Sep38QuoteProvider,
+  sep38SellAsset,
+  type AdapterCapabilities,
+  type AnchorAdapter,
+  type KycResult,
+  type OpenTransaction,
+  type Quote,
+  type RefundRef,
+  type TransactionStatus,
 } from "@corridor/adapter-kit";
 
 type FetchLike = typeof fetch;
@@ -57,12 +59,26 @@ export interface Sep6AssetInfo {
   readonly types: Readonly<Record<string, Sep6Type>>;
 }
 
+export interface Sep6Features {
+  readonly accountCreation?: boolean;
+  readonly claimableBalances?: boolean;
+  readonly price?: boolean;
+}
+
+export interface Sep6PriceInfo {
+  readonly enabled?: boolean;
+}
+
 /** The SEP-6 GET /info sections this adapter reads. */
 export interface Sep6Info {
   /** Non-exchange withdraw, keyed by asset code (e.g. "ARS"). */
   readonly withdraw: Readonly<Record<string, Sep6AssetInfo>>;
   /** Exchange-based withdraw (`withdraw-exchange`), keyed by asset code. */
   readonly withdrawExchange: Readonly<Record<string, Sep6AssetInfo>>;
+  /** Features advertised by the anchor (e.g. claimable_balances, price). */
+  readonly features?: Sep6Features;
+  /** Price endpoint section if advertised by the anchor. */
+  readonly price?: Sep6PriceInfo;
 }
 
 export interface Sep6AdapterOptions {
@@ -182,9 +198,31 @@ function parseSection(raw: unknown): Readonly<Record<string, Sep6AssetInfo>> {
  */
 export function parseSep6Info(raw: unknown): Sep6Info {
   const doc = asObject(raw);
+  const rawFeatures = asObject(doc.features);
+  const rawPrice = asObject(doc.price);
+
+  const features: Sep6Features = {
+    ...(typeof rawFeatures.account_creation === "boolean"
+      ? { accountCreation: rawFeatures.account_creation }
+      : {}),
+    ...(typeof rawFeatures.claimable_balances === "boolean"
+      ? { claimableBalances: rawFeatures.claimable_balances }
+      : {}),
+    ...(typeof rawFeatures.price === "boolean" ? { price: rawFeatures.price } : {}),
+  };
+
+  const price: Sep6PriceInfo = {
+    ...(typeof rawPrice.enabled === "boolean" ? { enabled: rawPrice.enabled } : {}),
+  };
+
+  const hasFeatures = Object.keys(features).length > 0;
+  const hasPrice = Object.keys(price).length > 0;
+
   return {
     withdraw: parseSection(doc.withdraw),
     withdrawExchange: parseSection(doc["withdraw-exchange"]),
+    ...(hasFeatures ? { features } : {}),
+    ...(hasPrice ? { price } : {}),
   };
 }
 
@@ -203,6 +241,7 @@ export class Sep6Adapter implements AnchorAdapter {
   /** Asset code `/info` keys by, derived from `dest.asset`. */
   private readonly destAssetCode: string;
   private readonly fetchImpl: FetchLike;
+  private readonly sep38Provider: Sep38QuoteProvider;
   private cachedInfo?: Sep6Info;
 
   constructor(corridor: Corridor, opts: Sep6AdapterOptions = {}) {
@@ -215,6 +254,11 @@ export class Sep6Adapter implements AnchorAdapter {
     this.name = this.anchor.name;
     this.destAssetCode = infoAssetCode(this.anchor.asset);
     this.fetchImpl = opts.fetchImpl ?? fetch;
+    this.sep38Provider = new Sep38QuoteProvider({
+      context: "sep6",
+      fetchImpl: this.fetchImpl,
+      name: this.name,
+    });
   }
 
   /**
@@ -257,15 +301,27 @@ export class Sep6Adapter implements AnchorAdapter {
     return this.cachedInfo?.withdrawExchange[this.destAssetCode];
   }
 
+  private hasIndicativePrice(): boolean {
+    return (
+      this.cachedInfo?.features?.price === true || this.cachedInfo?.price?.enabled === true
+    );
+  }
+
   capabilities(): AdapterCapabilities {
     const e = this.anchor.endpoints;
     const entry = this.withdrawExchangeEntry();
     // Only an explicit `enabled: false` disables; absent means the anchor did
     // not say. Missing entry (asset not offered) is unsupported either way.
     const settleable = entry !== undefined && entry.enabled !== false;
+    let quoteKind: "sep38_firm" | "sep38_indicative" | "none" = "none";
+    if (e.quote_server) {
+      quoteKind = "sep38_firm";
+    } else if (this.hasIndicativePrice()) {
+      quoteKind = "sep38_indicative";
+    }
     return {
       protocol: "sep6",
-      quotes: e.quote_server ? ["sep38_firm"] : ["none"],
+      quotes: quoteKind === "none" ? ["none"] : [quoteKind],
       kyc: e.kyc_server ? "sep12" : "sep6_fields",
       // The SEP-6 adapter does not assume a SEP-31 deposit address: it reports
       // on-chain vs off-chain itself (see docs/rfcs/0001). Empty until info()
@@ -280,8 +336,101 @@ export class Sep6Adapter implements AnchorAdapter {
     return fail("ANCHOR_UNAVAILABLE", `${this.name}: SEP-6 ${verb} is not implemented yet`);
   }
 
-  async requestQuote(_intent: PaymentIntent, _corridor: Corridor): Promise<Outcome<Quote>> {
-    return this.notImplemented("requestQuote");
+  async requestQuote(intent: PaymentIntent, corridor: Corridor): Promise<Outcome<Quote>> {
+    const e = this.anchor.endpoints;
+    if (e.quote_server) {
+      return this.sep38Provider.quote(intent, corridor);
+    }
+
+    const infoRes = await this.info();
+    if (!infoRes.ok) return infoRes;
+
+    if (!this.hasIndicativePrice()) {
+      return fail(
+        "QUOTE_UNAVAILABLE",
+        `${this.name}: anchor exposes no SEP-38 quote server or indicative price endpoint`,
+      );
+    }
+
+    // Indicative price path per SEP-6 § "Asset Conversions Using the Market Rate"
+    // and SEP-38 § "GET /price". When the anchor does not configure a dedicated
+    // quote_server but advertises indicative pricing via /info (features.price or
+    // price.enabled), query GET {transfer_server}/price with context=sep6.
+    // Per SEP-38, GET /price returns an indicative rate and does not guarantee
+    // execution or issue a quote id, so the resulting Quote has firm: false.
+    const server = e.transfer_server;
+    const sellAsset = sep38SellAsset(corridor);
+    const buyAsset = corridor.dest.asset;
+
+    try {
+      const url = new URL(`${server}/price`);
+      url.searchParams.set("context", "sep6");
+      url.searchParams.set("sell_asset", sellAsset);
+      url.searchParams.set("buy_asset", buyAsset);
+      url.searchParams.set("sell_amount", intent.sourceAmount.amount);
+
+      const res = await this.fetchImpl(url.toString(), { method: "GET" });
+      if (!res.ok) {
+        return fail("QUOTE_UNAVAILABLE", `${this.name}: indicative price HTTP ${res.status}`, {
+          retryable: res.status >= 500,
+        });
+      }
+
+      const j = (await res.json()) as {
+        price?: string;
+        total_price?: string;
+        buy_amount?: string;
+        sell_amount?: string;
+        fee?: { total?: string; asset?: string };
+      };
+
+      if (!j.price || !isValidAmount(j.price)) {
+        return fail(
+          "QUOTE_UNAVAILABLE",
+          `${this.name}: indicative price response missing valid price`,
+        );
+      }
+      if (!j.buy_amount || !isValidAmount(j.buy_amount)) {
+        return fail(
+          "QUOTE_UNAVAILABLE",
+          `${this.name}: indicative price response missing valid buy_amount`,
+        );
+      }
+
+      const sellAmount = j.sell_amount ?? intent.sourceAmount.amount;
+      if (!isValidAmount(sellAmount)) {
+        return fail(
+          "QUOTE_UNAVAILABLE",
+          `${this.name}: indicative price sell_amount "${sellAmount}" is malformed`,
+        );
+      }
+
+      let fee: Money | undefined;
+      if (j.fee) {
+        if (j.fee.asset && j.fee.asset !== sellAsset) {
+          return fail(
+            "QUOTE_UNAVAILABLE",
+            `${this.name}: quote fee asset "${j.fee.asset}" does not match sell asset "${sellAsset}"`,
+          );
+        }
+        if (j.fee.total && isValidAmount(j.fee.total)) {
+          fee = { asset: intent.sourceAmount.asset, amount: j.fee.total };
+        }
+      }
+
+      return ok<Quote>({
+        price: j.price,
+        sourceAmount: { asset: intent.sourceAmount.asset, amount: sellAmount },
+        destAmount: { asset: buyAsset, amount: j.buy_amount },
+        ...(fee ? { fee } : {}),
+        firm: false,
+      });
+    } catch (cause) {
+      return fail("ANCHOR_UNAVAILABLE", `${this.name}: indicative price request failed`, {
+        retryable: true,
+        cause,
+      });
+    }
   }
 
   async ensureCompliance(

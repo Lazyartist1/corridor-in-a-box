@@ -248,7 +248,6 @@ describe("Sep6Adapter", () => {
     const adapter = new Sep6Adapter(sep6Corridor(), { fetchImpl: fakeFetch({}).fn });
     const c = sep6Corridor();
     const outcomes = await Promise.all([
-      adapter.requestQuote(intent, c),
       adapter.ensureCompliance(intent, c),
       adapter.openTransaction(intent, quote, c),
       adapter.getTransaction("tx1"),
@@ -258,5 +257,180 @@ describe("Sep6Adapter", () => {
       expect(r.ok).toBe(false);
       if (!r.ok) expect(r.error.code).toBe("ANCHOR_UNAVAILABLE");
     }
+  });
+
+  describe("requestQuote", () => {
+    it("delegates to Sep38QuoteProvider with context: 'sep6' for firm quotes", async () => {
+      let postedBody: unknown;
+      const fn = (async (input: string | URL, init?: RequestInit) => {
+        const url = input.toString();
+        const method = (init?.method ?? "GET").toUpperCase();
+        if (method === "POST" && url.endsWith("/quote")) {
+          postedBody = JSON.parse(String(init?.body));
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "q_sep6_firm",
+              price: "0.001",
+              total_price: "0.001",
+              expires_at: "2026-10-25T12:00:00Z",
+              sell_amount: "100",
+              buy_amount: "100000",
+            }),
+          } as Response;
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }) as unknown as typeof fetch;
+
+      const corridor = sep6Corridor({ quote_server: "https://d.example/sep38" });
+      const adapter = new Sep6Adapter(corridor, { fetchImpl: fn });
+
+      const resQuote = await adapter.requestQuote(intent, corridor);
+      expect(resQuote.ok).toBe(true);
+      if (resQuote.ok) {
+        expect(resQuote.value.id).toBe("q_sep6_firm");
+        expect(resQuote.value.firm).toBe(true);
+        expect(resQuote.value.price).toBe("0.001");
+        expect(resQuote.value.destAmount.amount).toBe("100000");
+      }
+      expect(postedBody).toEqual({
+        context: "sep6",
+        sell_asset: "stellar:USDC:GISSUER",
+        buy_asset: "iso4217:ARS",
+        sell_amount: "100",
+      });
+    });
+
+    it("applies total_price consistency check to the firm SEP-6 path", async () => {
+      const fn = (async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          id: "q_inconsistent",
+          price: "0.001",
+          total_price: "0.002", // Inconsistent: 100000 * 0.002 = 200, but sell_amount is 100
+          expires_at: "2026-10-25T12:00:00Z",
+          sell_amount: "100",
+          buy_amount: "100000",
+        }),
+      })) as unknown as typeof fetch;
+
+      const corridor = sep6Corridor({ quote_server: "https://d.example/sep38" });
+      const adapter = new Sep6Adapter(corridor, { fetchImpl: fn });
+
+      const resQuote = await adapter.requestQuote(intent, corridor);
+      expect(resQuote.ok).toBe(false);
+      if (!resQuote.ok) {
+        expect(resQuote.error.code).toBe("QUOTE_UNAVAILABLE");
+        expect(resQuote.error.message).toContain("internally inconsistent");
+      }
+    });
+
+    it("fetches indicative rate via GET /price when /info advertises features.price", async () => {
+      const fixtureWithPrice = {
+        ...INFO_FIXTURE,
+        features: { price: true },
+      };
+      const { fn, calls } = fakeFetch({
+        "GET /info": res(fixtureWithPrice),
+        "GET /price": res({
+          price: "950",
+          buy_amount: "95000",
+          sell_amount: "100",
+        }),
+      });
+
+      const corridor = sep6Corridor(); // No quote_server configured
+      const adapter = new Sep6Adapter(corridor, { fetchImpl: fn });
+
+      // Before info() is read, capabilities reports none
+      expect(adapter.capabilities().quotes).toEqual(["none"]);
+
+      const resQuote = await adapter.requestQuote(intent, corridor);
+      expect(resQuote.ok).toBe(true);
+      if (resQuote.ok) {
+        expect(resQuote.value.firm).toBe(false);
+        expect(resQuote.value.id).toBeUndefined();
+        expect(resQuote.value.price).toBe("950");
+        expect(resQuote.value.destAmount.amount).toBe("95000");
+      }
+
+      // After info() read, capabilities reports sep38_indicative
+      expect(adapter.capabilities().quotes).toEqual(["sep38_indicative"]);
+
+      const priceCall = calls.find((c) => c.url.includes("/price"));
+      expect(priceCall).toBeDefined();
+      const parsedUrl = new URL(priceCall!.url);
+      expect(parsedUrl.pathname).toBe("/sep6/price");
+      expect(parsedUrl.searchParams.get("context")).toBe("sep6");
+      expect(parsedUrl.searchParams.get("sell_asset")).toBe("stellar:USDC:GISSUER");
+      expect(parsedUrl.searchParams.get("buy_asset")).toBe("iso4217:ARS");
+      expect(parsedUrl.searchParams.get("sell_amount")).toBe("100");
+    });
+
+    it("fetches indicative rate via GET /price when /info advertises price.enabled", async () => {
+      const fixtureWithPrice = {
+        ...INFO_FIXTURE,
+        price: { enabled: true },
+      };
+      const { fn } = fakeFetch({
+        "GET /info": res(fixtureWithPrice),
+        "GET /price": res({
+          price: "920",
+          buy_amount: "92000",
+          fee: { total: "1.5", asset: "stellar:USDC:GISSUER" },
+        }),
+      });
+
+      const corridor = sep6Corridor();
+      const adapter = new Sep6Adapter(corridor, { fetchImpl: fn });
+
+      const resQuote = await adapter.requestQuote(intent, corridor);
+      expect(resQuote.ok).toBe(true);
+      if (resQuote.ok) {
+        expect(resQuote.value.firm).toBe(false);
+        expect(resQuote.value.price).toBe("920");
+        expect(resQuote.value.fee).toEqual({ asset: "USDC", amount: "1.5" });
+      }
+    });
+
+    it("rejects indicative price with mismatched fee asset", async () => {
+      const fixtureWithPrice = {
+        ...INFO_FIXTURE,
+        features: { price: true },
+      };
+      const { fn } = fakeFetch({
+        "GET /info": res(fixtureWithPrice),
+        "GET /price": res({
+          price: "920",
+          buy_amount: "92000",
+          fee: { total: "1.5", asset: "stellar:UNKNOWN:GISSUER" },
+        }),
+      });
+
+      const corridor = sep6Corridor();
+      const adapter = new Sep6Adapter(corridor, { fetchImpl: fn });
+
+      const resQuote = await adapter.requestQuote(intent, corridor);
+      expect(resQuote.ok).toBe(false);
+      if (!resQuote.ok) {
+        expect(resQuote.error.code).toBe("QUOTE_UNAVAILABLE");
+        expect(resQuote.error.message).toContain("does not match sell asset");
+      }
+    });
+
+    it("fails with QUOTE_UNAVAILABLE when anchor advertises neither quote_server nor indicative price", async () => {
+      const { fn } = fakeFetch({ "GET /info": res(INFO_FIXTURE) });
+      const corridor = sep6Corridor();
+      const adapter = new Sep6Adapter(corridor, { fetchImpl: fn });
+
+      const resQuote = await adapter.requestQuote(intent, corridor);
+      expect(resQuote.ok).toBe(false);
+      if (!resQuote.ok) {
+        expect(resQuote.error.code).toBe("QUOTE_UNAVAILABLE");
+      }
+      expect(adapter.capabilities().quotes).toEqual(["none"]);
+    });
   });
 });
