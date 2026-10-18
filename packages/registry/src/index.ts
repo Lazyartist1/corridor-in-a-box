@@ -100,6 +100,55 @@ export function filterAttestations(
   });
 }
 
+/**
+ * Default maximum staleness threshold in ledgers (2 days ≈ 34,560 ledgers at 5s/ledger).
+ * Used by sweep checks to prevent the registry from going silently stale behind a green cron.
+ */
+export const DEFAULT_MAX_STALENESS_LEDGERS = 34_560;
+
+/** Default query staleness for the liveSep31Anchors query (~1 week ≈ 120,960 ledgers at 5s/ledger). */
+export const DEFAULT_LIVE_ANCHORS_MAX_STALENESS_LEDGERS = 120_960;
+
+export interface StalenessRecord {
+  readonly domain: string;
+  readonly staleness?: number | null;
+}
+
+export type StaleReason = "stale" | "never-attested";
+
+export interface StaleFinding {
+  readonly domain: string;
+  readonly reason: StaleReason;
+  readonly staleness?: number;
+}
+
+/**
+ * Identify domains that are either older than `threshold` ledgers or never attested.
+ *
+ * Pure function. Treats missing or null staleness as "never-attested".
+ *
+ * @param records List of domain records or dictionary mapping domain -> staleness ledgers
+ * @param threshold Max allowed staleness in ledgers (default 34,560)
+ */
+export function findStale(
+  records: readonly StalenessRecord[] | Readonly<Record<string, number | null | undefined>>,
+  threshold: number = DEFAULT_MAX_STALENESS_LEDGERS,
+): StaleFinding[] {
+  const list: StalenessRecord[] = Array.isArray(records)
+    ? records
+    : Object.entries(records).map(([domain, staleness]) => ({ domain, staleness }));
+
+  const stale: StaleFinding[] = [];
+  for (const r of list) {
+    if (r.staleness === undefined || r.staleness === null) {
+      stale.push({ domain: r.domain, reason: "never-attested" });
+    } else if (r.staleness > threshold) {
+      stale.push({ domain: r.domain, reason: "stale", staleness: r.staleness });
+    }
+  }
+  return stale;
+}
+
 export interface RegistryOptions {
   /** Soroban RPC endpoint. */
   rpcUrl: string;
