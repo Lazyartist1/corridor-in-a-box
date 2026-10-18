@@ -182,15 +182,18 @@ export async function runConformance(
           detail: "openTransaction returned a non-Outcome value",
         });
       } else if (opened.ok) {
+        const kind = opened.value.instructions?.kind;
+        const advertised = caps ? (caps.settlement as readonly string[]) : undefined;
         const hasInstructions =
           typeof opened.value.transactionId === "string" &&
-          (opened.value.depositAddress !== undefined || opened.value.memo !== undefined);
+          kind !== undefined &&
+          (advertised === undefined || advertised.includes(kind));
         results.push({
           name: "openTransaction returns valid Outcome",
           passed: hasInstructions,
           detail: hasInstructions
-            ? `opened tx ${opened.value.transactionId}`
-            : "openTransaction succeeded but missing transactionId or deposit instructions",
+            ? `opened tx ${opened.value.transactionId} with ${kind} instructions`
+            : `openTransaction succeeded but returned no transactionId, no instructions, or instruction kind "${String(kind)}" not listed in capabilities().settlement`,
         });
       } else {
         results.push({
