@@ -26,6 +26,23 @@ import {
   type PartyRef,
   type PaymentIntent,
 } from "@corridor/types";
+import {
+  parseChosenRouteOption,
+  signRouteOption,
+  verifyRouteOption,
+  type ChosenRouteOption,
+  type ChosenRouteOptionPayload,
+  type ChosenRouteOptionQuote,
+  type RouteOptionRejection,
+} from "./route-option";
+
+export { signRouteOption, verifyRouteOption };
+export type {
+  ChosenRouteOption,
+  ChosenRouteOptionPayload,
+  ChosenRouteOptionQuote,
+  RouteOptionRejection,
+};
 
 export interface RateLimitOptions {
   /** Bucket size (max burst). */
@@ -98,6 +115,11 @@ export interface ServiceOptions {
    * Timeout in milliseconds for each individual readiness check. Default 5000 ms.
    */
   readinessTimeoutMs?: number;
+  /**
+   * HMAC-SHA256 key used to verify signed `routeOption` payloads submitted on
+   * `POST /payments`. Fails closed when omitted and a client submits `routeOption`.
+   */
+  routeOptionSecret?: string;
 }
 
 /** Default cap on a buffered request body. A payment intent is well under 1 KiB. */
@@ -306,7 +328,12 @@ const PAYMENT_FIELDS = new Set([
   "recipient",
   "sourceAmount",
   "destinationFields",
+  "routeOption",
 ]);
+
+export type ParsedPaymentIntent = PaymentIntent & {
+  routeOption?: ChosenRouteOption;
+};
 
 /** idempotencyKey becomes a Postgres primary key and a log field. Bounded and
  *  charset-checked here the same way the web route bounds it (web/app/api/payments/route.ts):
@@ -375,7 +402,7 @@ function parseParty(
  * error mapping follows): field names and bounds, never upstream URLs or
  * response bodies.
  */
-export function parsePaymentBody(o: unknown): Outcome<PaymentIntent, PaymentBodyError> {
+export function parsePaymentBody(o: unknown): Outcome<ParsedPaymentIntent, PaymentBodyError> {
   if (!isPlainObject(o)) {
     return reject("<body>", "expected a JSON object");
   }
@@ -458,6 +485,15 @@ export function parsePaymentBody(o: unknown): Outcome<PaymentIntent, PaymentBody
     }
   }
 
+  let routeOption: ChosenRouteOption | undefined;
+  if (o.routeOption !== undefined) {
+    const parsedOption = parseChosenRouteOption(o.routeOption);
+    if (!parsedOption.ok) {
+      return reject("routeOption", parsedOption.error);
+    }
+    routeOption = parsedOption.value;
+  }
+
   return ok({
     idempotencyKey,
     corridorId,
@@ -465,6 +501,7 @@ export function parsePaymentBody(o: unknown): Outcome<PaymentIntent, PaymentBody
     recipient,
     sourceAmount,
     ...(destinationFields ? { destinationFields } : {}),
+    ...(routeOption ? { routeOption } : {}),
   });
 }
 
@@ -667,11 +704,53 @@ export function createService(options: ServiceOptions): Service {
           },
         };
       }
+
+      const { routeOption, ...paymentIntent } = intent;
+      let effectiveDeps: EngineDeps = options.deps;
+      if (routeOption !== undefined) {
+        const verified = verifyRouteOption(routeOption, options.routeOptionSecret, {
+          corridorId: paymentIntent.corridorId,
+          sourceAmount: paymentIntent.sourceAmount,
+          receivingDomain: corridor.dest.endpoints.home_domain,
+          nowMs: now(),
+        });
+        if (!verified.ok) {
+          return {
+            status: verified.error.status,
+            body: {
+              error: "ROUTE_OPTION_INVALID",
+              reason: verified.error.code,
+              field: "routeOption",
+              message: verified.error.message,
+            },
+          };
+        }
+        if (verified.value.label === "locked" && verified.value.quote) {
+          const pinned = verified.value.quote;
+          effectiveDeps = {
+            ...options.deps,
+            quoteProvider: {
+              source: "native",
+              quote: async () =>
+                ok({
+                  id: pinned.id,
+                  price: pinned.price,
+                  expiresAt: pinned.expiresAt,
+                  sourceAmount: pinned.sourceAmount,
+                  destAmount: pinned.destAmount,
+                  ...(pinned.fee ? { fee: pinned.fee } : {}),
+                  firm: true,
+                }),
+            },
+          };
+        }
+      }
+
       // Owner comes from the VALIDATED bearer, never from the body — a client
       // must not be able to claim another tenant's runs by asking.
       // The request id travels with it: every log line and audit entry the run
       // produces is stamped with the same id this response echoes.
-      const p = execute(intent, corridor, options.deps, {
+      const p = execute(paymentIntent, corridor, effectiveDeps, {
         owner: presentedKey,
         requestId: ctx.requestId,
         ...(ctx.traceparent ? { traceparent: ctx.traceparent } : {}),

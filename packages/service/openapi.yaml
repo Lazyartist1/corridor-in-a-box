@@ -307,6 +307,39 @@ components:
           type: object
           maxProperties: 50
           additionalProperties: { type: string, maxLength: 256 }
+        routeOption:
+          $ref: "#/components/schemas/ChosenRouteOption"
+    ChosenRouteOptionQuote:
+      type: object
+      required: [id, sourceAmount, destAmount, price, expiresAt]
+      additionalProperties: false
+      properties:
+        id: { type: string, minLength: 1, maxLength: 128 }
+        sourceAmount: { $ref: "#/components/schemas/Money" }
+        destAmount: { $ref: "#/components/schemas/Money" }
+        price: { type: string, pattern: "^[0-9]+(\\.[0-9]+)?$" }
+        fee: { $ref: "#/components/schemas/Money" }
+        expiresAt: { type: number }
+    ChosenRouteOption:
+      type: object
+      required:
+        - corridorId
+        - receivingDomain
+        - protocol
+        - label
+        - sourceAmount
+        - expiresAt
+        - signature
+      additionalProperties: false
+      properties:
+        corridorId: { type: string, minLength: 1, maxLength: 128 }
+        receivingDomain: { type: string, minLength: 1, maxLength: 255 }
+        protocol: { type: string, enum: [sep31, sep6, wallet] }
+        label: { type: string, enum: [locked, indicative, estimated] }
+        sourceAmount: { $ref: "#/components/schemas/Money" }
+        expiresAt: { type: number }
+        quote: { $ref: "#/components/schemas/ChosenRouteOptionQuote" }
+        signature: { type: string, minLength: 1, maxLength: 256 }
     CorridorState:
       type: string
       enum:
