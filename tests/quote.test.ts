@@ -373,3 +373,117 @@ describe("engine integration with QuoteProvider & quote_source native", () => {
     }
   });
 });
+
+describe("supplied locked quote expiry (#623)", () => {
+  it("refuses an expired locked quote with deps.now past expiresAt without re-quoting or calling submit()", async () => {
+    const expiredAt = 1_900_000_000_000;
+    const nowMs = expiredAt + 5_000;
+    let requestQuoteCalls = 0;
+    let submitCalls = 0;
+
+    const baseAdapter = createMockAdapter();
+    const adapter: AnchorAdapter = {
+      ...baseAdapter,
+      async requestQuote(intent, corridor) {
+        requestQuoteCalls += 1;
+        return baseAdapter.requestQuote(intent, corridor);
+      },
+    };
+
+    const mockSubmitter = createMockSubmitter();
+    const d: EngineDeps = {
+      resolver: new StaticRouteResolver(() => adapter, {
+        trustManifestWithoutAttestation: true,
+      }),
+      submitter: {
+        ...mockSubmitter,
+        async submit(req) {
+          submitCalls += 1;
+          return mockSubmitter.submit(req);
+        },
+      },
+      idempotency: new InMemoryIdempotencyStore(),
+      now: () => nowMs,
+      trustManifestWithoutAttestation: true,
+      unsafeSkipPreSettleGate: true,
+    };
+
+    const lockedQuote: Quote = {
+      id: "locked-q-1",
+      price: "100",
+      expiresAt: expiredAt,
+      sourceAmount: { asset: "USDC", amount: "100" },
+      destAmount: { asset: "iso4217:ARS", amount: "10000" },
+      firm: true,
+    };
+
+    const r = await execute(
+      { ...sampleIntent, idempotencyKey: "expired-locked-1" },
+      corridorFixture(),
+      d,
+      { quote: lockedQuote },
+    );
+
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error.code).toBe("QUOTE_EXPIRED");
+      expect(r.error.retryable).toBe(false);
+      expect(r.error.message).toContain("locked-q-1");
+    }
+    expect(requestQuoteCalls).toBe(0);
+    expect(submitCalls).toBe(0);
+  });
+
+  it("honours a valid supplied locked quote without re-quoting", async () => {
+    const nowMs = 1_900_000_000_000;
+    let requestQuoteCalls = 0;
+    let submitCalls = 0;
+
+    const baseAdapter = createMockAdapter();
+    const adapter: AnchorAdapter = {
+      ...baseAdapter,
+      async requestQuote(intent, corridor) {
+        requestQuoteCalls += 1;
+        return baseAdapter.requestQuote(intent, corridor);
+      },
+    };
+
+    const mockSubmitter = createMockSubmitter();
+    const d: EngineDeps = {
+      resolver: new StaticRouteResolver(() => adapter, {
+        trustManifestWithoutAttestation: true,
+      }),
+      submitter: {
+        ...mockSubmitter,
+        async submit(req) {
+          submitCalls += 1;
+          return mockSubmitter.submit(req);
+        },
+      },
+      idempotency: new InMemoryIdempotencyStore(),
+      now: () => nowMs,
+      trustManifestWithoutAttestation: true,
+      unsafeSkipPreSettleGate: true,
+    };
+
+    const lockedQuote: Quote = {
+      id: "locked-q-valid",
+      price: "100",
+      expiresAt: nowMs + 60_000,
+      sourceAmount: { asset: "USDC", amount: "100" },
+      destAmount: { asset: "iso4217:ARS", amount: "10000" },
+      firm: true,
+    };
+
+    const r = await execute(
+      { ...sampleIntent, idempotencyKey: "valid-locked-1" },
+      corridorFixture(),
+      d,
+      { quote: lockedQuote },
+    );
+
+    expect(r.ok).toBe(true);
+    expect(requestQuoteCalls).toBe(0);
+    expect(submitCalls).toBe(1);
+  });
+});

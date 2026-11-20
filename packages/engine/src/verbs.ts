@@ -30,15 +30,27 @@ import {
 } from "./ports";
 import type { Logger, Metrics } from "./observability";
 
-// 1. QUOTE — SEP-38. Get a price and verify the firm-quote window hasn't already
-//    closed. who_holds_risk in the manifest records who eats slippage if it does.
+// 1. QUOTE — SEP-38. Get a price (or validate a caller-supplied quote without
+//    re-quoting) and verify the firm-quote window hasn't already closed.
+//    who_holds_risk in the manifest records who eats slippage if it does.
 export async function quote(
   adapter: AnchorAdapter,
   intent: PaymentIntent,
   corridor: Corridor,
   now: number,
   provider?: QuoteProvider,
+  suppliedQuote?: Quote,
 ): Promise<Outcome<Quote>> {
+  if (suppliedQuote !== undefined) {
+    if (suppliedQuote.firm && suppliedQuote.expiresAt <= now) {
+      return fail(
+        "QUOTE_EXPIRED",
+        `supplied locked quote ${suppliedQuote.id} expired before use; refusing to re-quote`,
+        { retryable: false },
+      );
+    }
+    return ok(suppliedQuote);
+  }
   const q = provider
     ? await provider.quote(intent, corridor)
     : await adapter.requestQuote(intent, corridor);
