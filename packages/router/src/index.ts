@@ -220,3 +220,19 @@ export type {
   RoutePolicy,
   RouteRequest,
 } from "./planner";
+
+export {
+  buildEstimatedOption,
+  DEFAULT_ESTIMATE_MARGIN_BPS,
+  DEFAULT_ESTIMATE_WINDOW_DAYS,
+  DEFAULT_MIN_ESTIMATE_SAMPLES,
+} from "./estimated-price";
+export type {
+  EstimatedPriceDetails,
+  EstimatedPriceDropped,
+  EstimatedPriceOffered,
+  EstimatedPriceOutcome,
+  EstimatedPricePolicy,
+  EstimatePriceRequest,
+  RateSample,
+} from "./estimated-price";
