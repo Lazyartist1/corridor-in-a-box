@@ -98,3 +98,11 @@ export {
 
 export { createAdapterRegistry } from "./adapters";
 export type { AdapterFactory, AdapterRegistry } from "./adapters";
+export { ALL_PRICE_LABELS, filterOptionsByAllowedLabels } from "./label-policy";
+export type {
+  AllowedPriceLabel,
+  LabelledRouteOption,
+  LabelPolicy,
+  LabelPolicyFilterResult,
+  LabelRejectedOption,
+} from "./label-policy";
