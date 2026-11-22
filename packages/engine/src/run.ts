@@ -23,6 +23,7 @@ import {
   toLegacy,
   type ExternalQuoteFn,
   type OpenTransaction,
+  type Quote,
   type QuoteProvider,
 } from "@corridor/adapter-kit";
 import { canTransition, isTerminal, type CorridorState } from "./state";
@@ -188,6 +189,13 @@ export interface ExecuteOptions {
    * on-chain attestation.
    */
   trustManifestWithoutAttestation?: boolean;
+  /**
+   * Pre-obtained caller quote (e.g. a locked option presented to the sender).
+   * When present, the engine honours it instead of fetching a fresh quote, and
+   * refuses an expired firm quote (`QUOTE_EXPIRED`) rather than re-quoting at
+   * a different rate.
+   */
+  quote?: Quote;
   /**
    * Run quote → comply → open → pre-settle gate against the real anchor, then
    * stop before `settling`: `SettlementSubmitter.submit()` (and `findExisting`)
@@ -498,6 +506,11 @@ export async function execute(
   });
   const { advance, die, finishFailure } = context;
 
+  // Pin the resolved anchor domain and protocol on the run record (#624) so
+  // restarts and readers agree on which route was chosen.
+  run.receivingDomain = corridor.dest.endpoints.home_domain;
+  run.routeProtocol = corridor.dest.protocol;
+
   const strategies = deps.strategies ?? defaultStrategies(deps.submitter, adapter);
   const caps = adapter.capabilities();
   const compat = checkCompatibility(corridor, caps, strategies);
@@ -562,11 +575,14 @@ export async function execute(
   }
 
   // --- 1. quote ---------------------------------------------------------
-  const q = await timed("quote", () => quote(adapter, intent, corridor, now(), provider));
+  const q = await timed("quote", () =>
+    quote(adapter, intent, corridor, now(), provider, opts.quote),
+  );
   if (!q.ok) return die(q.error);
   run.quoteId = q.value.id;
   run.quoteExpiresAt = q.value.expiresAt;
   run.quoteFirm = q.value.firm;
+  run.priceLabel = q.value.firm ? "locked" : "indicative";
   run.settlementAmount = q.value.sourceAmount.amount;
   {
     const t = await advance("quoted");

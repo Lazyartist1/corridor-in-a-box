@@ -120,9 +120,15 @@ Update `contracts/deployments.json`:
     "rpcUrl": "https://mainnet.sorobanrpc.com",
     "registry": "<REGISTRY_ID>",
     "attester": "<ATTESTER_ID>",
-    "deployedAt": "2026-10-XX"
+    "deployedAt": "2026-10-XX",
+    "upgrades": []
   }
 ```
+
+The file is validated against `contracts/deployments.schema.json` by `tests/deployments.test.ts`.
+A deployed contract needs a `deployedAt` date, and every `upgrade()` is appended to `upgrades`
+(oldest first) with the contract name, the new wasm hash, the transaction hash, the date and the
+ledger, as in the `testnet` entry.
 
 ### 4. Consumer Opt-In
 

@@ -1,0 +1,137 @@
+{
+  "version": "0",
+  "legalEntity": {
+    "legalName": "Acorn Cross-Border Payments Ltd.",
+    "tradingName": "Acorn Pay",
+    "entityType": "Private Company Limited by Shares",
+    "countryOfIncorporation": "GB",
+    "incorporatedAt": "2023-04-12",
+    "registeredAddress": {
+      "line1": "20 Bishopsgate",
+      "city": "London",
+      "postalCode": "EC2N 4AG",
+      "country": "GB"
+    },
+    "website": "https://acornpay.example"
+  },
+  "registrationNumbers": [
+    {
+      "country": "GB",
+      "authority": "Companies House",
+      "number": "14812345",
+      "issuedAt": "2023-04-12",
+      "documentRefId": "doc-incorp"
+    }
+  ],
+  "licences": [
+    {
+      "jurisdiction": "GB",
+      "licenceType": "Authorised Payment Institution",
+      "licenceNumber": "FCA-901234",
+      "regulator": "Financial Conduct Authority",
+      "status": "active",
+      "validUntil": "2028-04-12",
+      "documentRefId": "doc-licence-gb"
+    }
+  ],
+  "ownership": {
+    "beneficialOwners": [
+      {
+        "fullName": "Adaeze Okafor",
+        "ownershipPercent": 60,
+        "nationality": "NG",
+        "countryOfResidence": "GB",
+        "isPep": false,
+        "role": "Chief Executive Officer"
+      },
+      {
+        "fullName": "Mateo Alvarez",
+        "ownershipPercent": 40,
+        "nationality": "AR",
+        "countryOfResidence": "GB",
+        "isPep": false,
+        "role": "Chief Operating Officer"
+      }
+    ],
+    "directors": [
+      {
+        "fullName": "Adaeze Okafor",
+        "role": "Managing Director",
+        "nationality": "NG",
+        "countryOfResidence": "GB",
+        "appointedAt": "2023-04-12"
+      }
+    ]
+  },
+  "amlCft": {
+    "policyVersion": "2026.2",
+    "policyDate": "2026-06-01",
+    "complianceOfficer": {
+      "name": "Priya Patel",
+      "title": "Money Laundering Reporting Officer",
+      "email": "compliance@acornpay.example",
+      "phone": "+44 20 7946 0192"
+    },
+    "screeningProviders": ["Chainalysis", "ComplyAdvantage"],
+    "sanctionsRegimes": ["OFAC", "UK-OFSI", "EU", "UN"],
+    "transactionMonitoringSummary": "Pre-transaction sanctions and velocity checks with manual MLRO review on flagged transfers.",
+    "documentRefId": "doc-aml-policy"
+  },
+  "stellarAccounts": [
+    {
+      "network": "public",
+      "publicKey": "GBN4NNCDGJO4XW4KQU3CBIESUJWFVBUZPOKUZHT7W7WRB7CWOA7BXVQF",
+      "purpose": "settlement",
+      "label": "Production settlement wallet"
+    },
+    {
+      "network": "testnet",
+      "publicKey": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+      "purpose": "sep10_auth",
+      "label": "Testnet SEP-10 client key"
+    }
+  ],
+  "contacts": [
+    {
+      "role": "primary",
+      "name": "Adaeze Okafor",
+      "email": "ops@acornpay.example"
+    },
+    {
+      "role": "compliance",
+      "name": "Priya Patel",
+      "email": "compliance@acornpay.example"
+    },
+    {
+      "role": "technical",
+      "name": "Samira Haddad",
+      "email": "engineering@acornpay.example"
+    }
+  ],
+  "documentReferences": [
+    {
+      "id": "doc-incorp",
+      "title": "Certificate of Incorporation",
+      "category": "incorporation",
+      "path": "onboarding/docs/certificate-of-incorporation.pdf",
+      "sha256": "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
+      "date": "2023-04-12"
+    },
+    {
+      "id": "doc-licence-gb",
+      "title": "FCA Authorised Payment Institution Register Extract",
+      "category": "licence",
+      "path": "onboarding/docs/fca-licence.pdf",
+      "sha256": "f0e1d2c3b4a5968778695a4b3c2d1e0ff0e1d2c3b4a5968778695a4b3c2d1e0f",
+      "date": "2026-01-15"
+    },
+    {
+      "id": "doc-aml-policy",
+      "title": "AML/CFT Program Summary",
+      "category": "aml_policy",
+      "path": "onboarding/docs/aml-cft-policy-2026.pdf",
+      "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "date": "2026-06-01"
+    }
+  ]
+}

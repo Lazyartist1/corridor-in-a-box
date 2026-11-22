@@ -1,0 +1,167 @@
+# Kills the service process after a payment has settled on testnet, restarts it
+# on the same Postgres, and requires the run to reach `completed` with the same
+# single transaction hash. The reference-corridor workflow proves the happy path
+# and the chaos tests cover failures with mocks; this is the failure path against
+# the live reference anchor and Horizon.
+#
+# A sibling of reference-corridor.yml rather than a step in it: it stands up the
+# same stack, but needs Postgres and runs a different driver, and a failure here
+# should not mask the happy-path result. Slow, so it runs on its own schedule and
+# by hand, never on push.
+name: reference-crash-resume
+on:
+  workflow_dispatch:
+  schedule:
+    # Offset from reference-corridor (05:43) so the two never contend for the
+    # signer's USDC balance.
+    - cron: "43 6 * * *"
+
+jobs:
+  crash-resume:
+    runs-on: ubuntu-latest
+    # The service's durable store. The anchor stack publishes 8080, 8085 and
+    # 8091 on the host, so 5432 is free.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: pg
+          POSTGRES_DB: corridor
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    # The stack is minutes to boot and the corridor waits on the observer's own
+    # cadence, but a hung container must not burn an hour of runner time.
+    timeout-minutes: 30
+    # Job-level, deliberately. The `secrets` context is NOT available in a
+    # step-level `if:` — using it there is not a no-op, it makes the whole
+    # workflow file invalid, and GitHub then fails every run at 0s without ever
+    # starting a step. Same fix as nightly-live-anchor.yml and attest-anchors.yml.
+    env:
+      SIGNER_SECRET: ${{ secrets.CORRIDOR_SIGNER_SECRET }}
+      # The account the reference anchor receives on, and the one the signer is
+      # topped up from. The image ships its own, but that account's seed is
+      # public, so anyone can merge it out from under us (someone did on
+      # 2026-11-16, and every settle failed op_no_destination). This one only
+      # this repo holds.
+      DISTRIBUTION_SECRET: ${{ secrets.REFERENCE_DISTRIBUTION_SECRET }}
+      # The corridor this job runs. Asserted to be testnet below before
+      # anything is signed.
+      MANIFEST: corridors/reference.corridor.yaml
+      # Never set. The runners' mainnet guard is the backstop; this is the
+      # first line, and it is here so a future edit to this file has to
+      # remove it deliberately rather than merely forget it.
+      CORRIDOR_ALLOW_MAINNET: ""
+      DATABASE_URL: postgres://postgres:pg@localhost:5432/corridor
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # --- guards, before anything is stood up or signed -------------------
+
+      # Testnet only. Parsed with the repo's own manifest loader rather than
+      # grepped, so a restructured YAML cannot slip a mainnet corridor past a
+      # pattern match.
+      - name: Refuse a non-testnet corridor
+        run: pnpm exec tsx scripts/assert-testnet-corridor.ts "$MANIFEST"
+
+      # Preflight checks: ensure runner commands exist before spinning up
+      # containers or attempting testnet settlement.
+      - name: Check the corridor runner's prerequisites
+        run: |
+          set -euo pipefail
+          missing=""
+          grep -q 'doctor)' scripts/reference-anchor.sh \
+            || missing="$missing scripts/reference-anchor.sh#doctor"
+          node -e 'process.exit(require("./package.json").scripts["verify:crash-resume"] ? 0 : 1)' \
+            || missing="$missing pnpm-verify:crash-resume"
+          if [ -n "$missing" ]; then
+            echo "::error::this job needs, and cannot find:$missing"
+            exit 1
+          fi
+
+      - name: Fail early without a signing key
+        if: ${{ env.SIGNER_SECRET == '' }}
+        run: |
+          echo "::error::CORRIDOR_SIGNER_SECRET is not set. A full corridor settles on" \
+               "testnet and cannot run unsigned — set the repository secret to a funded" \
+               "testnet seed."
+          exit 1
+
+      - name: Fail early without the anchor's receiving key
+        if: ${{ env.DISTRIBUTION_SECRET == '' }}
+        run: |
+          echo "::error::REFERENCE_DISTRIBUTION_SECRET is not set. The reference anchor needs" \
+               "a receiving account only this repo controls — set the repository secret to" \
+               "a testnet seed; pnpm prepare:distribution creates the account."
+          exit 1
+
+      # --- the run ---------------------------------------------------------
+
+      # Before `up`, so reference-anchor.sh can point the anchor's config at it.
+      # Writes DISTRIBUTION_ACCOUNT to $GITHUB_ENV.
+      - name: Prepare the anchor's receiving account
+        run: pnpm prepare:distribution
+
+      - name: Stand up the reference anchor
+        run: scripts/reference-anchor.sh up
+        env:
+          # Podman ships on the ubuntu-latest image, and the script's container
+          # wiring (network aliases the platform's test profile hardcodes) is
+          # written against it. Porting those steps to Docker would fork that
+          # wiring in two places and let CI and a contributor's laptop drift —
+          # the thing this job exists to prevent.
+          READY_TIMEOUT_SECS: "600"
+
+      - name: Health gate
+        run: scripts/reference-anchor.sh doctor
+
+      # Every run settles 10 testnet USDC from the signer into the anchor's
+      # receiving account, so the USDC goes round in a loop: this step pays it
+      # back from that account (DISTRIBUTION_SECRET, job env) when the signer
+      # runs low. FUND_AMOUNT is kept below FUND_MIN_BALANCE so the receiving
+      # account always holds enough to pay it: by the time the signer drops
+      # under 50, at least 30 has landed on the other side.
+      - name: Top up the signer
+        run: pnpm fund:testnet
+        env:
+          CORRIDOR_SIGNER_SECRET: ${{ env.SIGNER_SECRET }}
+          FUND_AMOUNT: "30"
+          FUND_MIN_BALANCE: "50"
+
+      # The driver starts and kills the service itself, and starts payout-watch
+      # only after the kill: the anchor pays out when called, so the run cannot
+      # finish while the service is down. Writes the result to the job summary.
+      - name: Kill the service after settle and resume
+        run: pnpm verify:crash-resume
+        env:
+          CORRIDOR_SIGNER_SECRET: ${{ env.SIGNER_SECRET }}
+
+      # --- evidence and cleanup -------------------------------------------
+
+      - name: Collect platform logs
+        if: ${{ failure() }}
+        run: scripts/reference-anchor.sh logs-dump anchor-logs
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ failure() }}
+        with:
+          name: reference-crash-resume-logs-${{ github.run_id }}
+          path: |
+            anchor-logs/
+            crash-resume-logs/
+          retention-days: 7
+          if-no-files-found: warn
+
+      - name: Tear down
+        if: ${{ always() }}
+        run: scripts/reference-anchor.sh down

@@ -56,14 +56,12 @@ an anchor is not attested, when its attestation is older than the staleness
 bound, or when the registry cannot be reached. An unreachable registry is
 "unknown", never "proceed".
 
-**Known gap.** The first-run call to `resolve()` is not wrapped in a `try`.
-The run has already been claimed in state `created` at that point, so an
-exception from `resolve()` propagates out of `execute()` and the run stays
-`created` instead of moving to `failed`. Callers must handle a rejected
-promise and must not treat `created` as terminal. This is tracked by the issue
-"execute() strands a run in `created` when RouteResolver.resolve() throws".
-When the engine turns the throw into a failed outcome, this section will say
-so.
+Both calls go through `resolveRoute()` in `packages/engine/src/run.ts`, which
+catches any thrown error and turns it into a non-retryable `ROUTE_REFUSED`
+failure (`retryable: false`). On the first run of `execute()`, that failure
+moves the run to terminal `failed` through `failRun()` so retries do not hit an
+idempotency conflict. On `resumeRun()`, pre-open runs move to `failed`, while
+later states where money may already be in flight stay untouched and resumable.
 
 ### Trust
 

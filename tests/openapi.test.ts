@@ -322,6 +322,10 @@ describe("openapi.yaml: route() responses match the spec", () => {
     await post(s, intent("openapi-get"));
     const found = await s.route({ method: "GET", path: "/payments/openapi-get" });
     expect(found.status).toBe(200);
+    expect(found.body).toMatchObject({
+      route: { receivingDomain: "d.example", protocol: "sep31" },
+      price: { label: "locked" },
+    });
     check(found, "/payments/{key}", "get");
     const missing = await s.route({ method: "GET", path: "/payments/nope" });
     expect(missing.status).toBe(404);

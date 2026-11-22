@@ -326,4 +326,64 @@ run("PostgresIdempotencyStore (live Postgres)", () => {
       reportedAt: 12345,
     });
   });
+
+  it("adds receiving_domain, route_protocol and price_label to a table created by the previous version", async () => {
+    await pool.query("drop table if exists corridor_resolutions");
+    await pool.query("drop table if exists corridor_runs");
+    await pool.query(`
+      create table corridor_runs (
+        idempotency_key text primary key,
+        corridor_id     text not null,
+        state           text not null,
+        version         integer not null,
+        transaction_id  text,
+        quote_id        text,
+        stellar_tx_hash text,
+        last_error      text,
+        owner           text,
+        updated_at      timestamptz not null default now()
+      );`);
+    await pool.query(
+      `insert into corridor_runs (idempotency_key, corridor_id, state, version)
+       values ('legacy-unpinned', 'c', 'settled', 1)`,
+    );
+
+    await migrate(pool as unknown as Queryable);
+
+    const s = store();
+    const legacy = await s.get("legacy-unpinned");
+    expect(legacy?.receivingDomain).toBeUndefined();
+    expect(legacy?.routeProtocol).toBeUndefined();
+    expect(legacy?.priceLabel).toBeUndefined();
+
+    await s.create(newRun("migrated-pinned"));
+    await s.put({
+      idempotencyKey: "migrated-pinned",
+      corridorId: "c",
+      state: "quoted",
+      version: 1,
+      receivingDomain: "zeam.money",
+      routeProtocol: "sep31",
+      priceLabel: "locked",
+    });
+    const pinned = await s.get("migrated-pinned");
+    expect(pinned?.receivingDomain).toBe("zeam.money");
+    expect(pinned?.routeProtocol).toBe("sep31");
+    expect(pinned?.priceLabel).toBe("locked");
+
+    // Once pinned, a later write cannot drift the pinned route.
+    await s.put({
+      idempotencyKey: "migrated-pinned",
+      corridorId: "c",
+      state: "settled",
+      version: 2,
+      receivingDomain: "other.example",
+      routeProtocol: "sep6",
+      priceLabel: "estimated",
+    });
+    const stillPinned = await s.get("migrated-pinned");
+    expect(stillPinned?.receivingDomain).toBe("zeam.money");
+    expect(stillPinned?.routeProtocol).toBe("sep31");
+    expect(stillPinned?.priceLabel).toBe("locked");
+  });
 });

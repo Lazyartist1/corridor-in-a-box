@@ -749,6 +749,22 @@ export function createService(options: ServiceOptions): Service {
       if (!run || (options.apiKeys && !ownerMatches(run.owner, presentedKey))) {
         return { status: 404, body: { error: "not found" } };
       }
+      const corridor = options.corridors.get(run.corridorId);
+      const runRoute = run as typeof run & {
+        receivingDomain?: string;
+        routeProtocol?: string;
+        priceLabel?: "locked" | "indicative" | "estimated";
+      };
+      const receivingDomain = runRoute.receivingDomain ?? corridor?.dest.endpoints.home_domain;
+      const protocol = runRoute.routeProtocol ?? corridor?.dest.protocol;
+      const priceLabel =
+        runRoute.priceLabel ??
+        (run.quoteFirm === true
+          ? "locked"
+          : run.quoteFirm === false
+            ? "indicative"
+            : undefined);
+
       return {
         status: 200,
         body: {
@@ -757,6 +773,8 @@ export function createService(options: ServiceOptions): Service {
           state: run.state,
           transactionId: run.transactionId,
           stellarTxHash: run.stellarTxHash,
+          ...(receivingDomain && protocol ? { route: { receivingDomain, protocol } } : {}),
+          ...(priceLabel ? { price: { label: priceLabel } } : {}),
           // Only the error CODE, never the stored message: lastError is
           // `${code}: ${message}` and the message carries anchor URLs, upstream
           // HTTP bodies and other internals the caller has no business seeing.

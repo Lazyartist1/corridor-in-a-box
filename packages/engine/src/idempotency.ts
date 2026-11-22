@@ -30,6 +30,12 @@ export interface StoredRun {
   quoteId?: string;
   quoteExpiresAt?: number;
   quoteFirm?: boolean;
+  /** Pinned receiving anchor home domain chosen for this run (#624). */
+  receivingDomain?: string;
+  /** Pinned destination protocol (`sep31`, `sep6`, `wallet`, `custom:<id>`) chosen for this run (#624). */
+  routeProtocol?: string;
+  /** Price firmness label (`locked`, `indicative`, or `estimated`) pinned for this run (#624). */
+  priceLabel?: "locked" | "indicative" | "estimated";
   settlementAmount?: string;
   stellarTxHash?: string;
   settlementKind?: "stellar" | "adapter";
@@ -150,6 +156,9 @@ export class InMemoryIdempotencyStore implements IdempotencyStore {
       // Once a source deposit reference is written, an older or incomplete
       // run snapshot must never erase it and permit a second deposit on resume.
       sourceTransactionId: existing?.sourceTransactionId ?? run.sourceTransactionId,
+      receivingDomain: existing?.receivingDomain ?? run.receivingDomain,
+      routeProtocol: existing?.routeProtocol ?? run.routeProtocol,
+      priceLabel: existing?.priceLabel ?? run.priceLabel,
     });
   }
 

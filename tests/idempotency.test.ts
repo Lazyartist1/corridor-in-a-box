@@ -242,6 +242,9 @@ function fakeDb(): Queryable & { table: Map<string, Record<string, unknown>> } {
         owner: params[18],
         settlement: params[19],
         manifest_hash: params[20],
+        receiving_domain: params[21],
+        route_protocol: params[22],
+        price_label: params[23],
       };
       // create(): INSERT … ON CONFLICT DO NOTHING RETURNING — only the first
       // writer for a key lands a row and gets it back; a conflict returns [].
@@ -261,6 +264,9 @@ function fakeDb(): Queryable & { table: Map<string, Record<string, unknown>> } {
           settlement_ref: incoming.settlement_ref ?? current?.settlement_ref,
           refund_id: current?.refund_id ?? incoming.refund_id,
           manifest_hash: current?.manifest_hash ?? incoming.manifest_hash,
+          receiving_domain: current?.receiving_domain ?? incoming.receiving_domain,
+          route_protocol: current?.route_protocol ?? incoming.route_protocol,
+          price_label: current?.price_label ?? incoming.price_label,
         });
       }
       return { rows: [] as R[] };
@@ -448,6 +454,9 @@ describe("refund state round-trips", () => {
       "source_transaction_id",
       "settlement_kind",
       "settlement_ref",
+      "receiving_domain",
+      "route_protocol",
+      "price_label",
     ]) {
       expect(seen[0]).toContain(column);
       expect(seen.slice(1).join("\n")).toContain(`add column if not exists ${column}`);
@@ -675,5 +684,44 @@ describe("PostgresIdempotencyStore", () => {
       kind: "stellar",
       stellarTxHash: "old_stellar_tx_hash",
     });
+  });
+
+  it("persists receivingDomain, routeProtocol and priceLabel across execute and Postgres store (#624)", async () => {
+    const store = new InMemoryIdempotencyStore();
+    const res = await execute(
+      { ...intent, idempotencyKey: "pinned-exec-1" },
+      corridor(),
+      deps(store),
+    );
+    expect(res.ok).toBe(true);
+    const saved = await store.get("pinned-exec-1");
+    expect(saved?.receivingDomain).toBe("d.example");
+    expect(saved?.routeProtocol).toBe("sep31");
+    expect(saved?.priceLabel).toBe("locked");
+
+    const pg = new PostgresIdempotencyStore(fakeDb());
+    await pg.create({
+      idempotencyKey: "pinned-pg-1",
+      corridorId: "test",
+      state: "created",
+      version: 0,
+      receivingDomain: "d.example",
+      routeProtocol: "sep31",
+      priceLabel: "locked",
+    });
+    // Later update with unset/different route fields must preserve the pinned route.
+    await pg.put({
+      idempotencyKey: "pinned-pg-1",
+      corridorId: "test",
+      state: "settled",
+      version: 2,
+      receivingDomain: "other.example",
+      routeProtocol: "sep6",
+      priceLabel: "estimated",
+    });
+    const gotPg = await pg.get("pinned-pg-1");
+    expect(gotPg?.receivingDomain).toBe("d.example");
+    expect(gotPg?.routeProtocol).toBe("sep31");
+    expect(gotPg?.priceLabel).toBe("locked");
   });
 });

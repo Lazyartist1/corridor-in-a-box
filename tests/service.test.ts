@@ -969,3 +969,48 @@ describe("service: X-Request-Id propagation", () => {
     }
   });
 });
+
+describe("service: GET /payments/:key route and price metadata (#629)", () => {
+  it("exposes route.receivingDomain, route.protocol and price.label on payment status", async () => {
+    const s = svc();
+    const key = "status-route-1";
+    const postRes = await s.route({
+      method: "POST",
+      path: "/payments",
+      body: intentBody(key),
+    });
+    expect(postRes.status).toBe(200);
+
+    const statusRes = await s.route({ method: "GET", path: `/payments/${key}` });
+    expect(statusRes.status).toBe(200);
+    expect(statusRes.body).toMatchObject({
+      idempotencyKey: key,
+      corridorId: "test",
+      state: "completed",
+      route: { receivingDomain: "d.example", protocol: "sep31" },
+      price: { label: "locked" },
+    });
+  });
+
+  it("prefers persisted pinned route fields and indicative label when stored on the run", async () => {
+    const store = new InMemoryIdempotencyStore();
+    await store.put({
+      idempotencyKey: "status-route-stored",
+      corridorId: "test",
+      state: "quoted",
+      version: 1,
+      quoteFirm: false,
+      receivingDomain: "pinned.example",
+      routeProtocol: "sep6",
+      priceLabel: "estimated",
+    } as never);
+
+    const s = svc({ deps: { ...deps(), idempotency: store } });
+    const statusRes = await s.route({ method: "GET", path: "/payments/status-route-stored" });
+    expect(statusRes.status).toBe(200);
+    expect(statusRes.body).toMatchObject({
+      route: { receivingDomain: "pinned.example", protocol: "sep6" },
+      price: { label: "estimated" },
+    });
+  });
+});

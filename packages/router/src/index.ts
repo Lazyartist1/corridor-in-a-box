@@ -106,3 +106,15 @@ export type {
   LabelPolicyFilterResult,
   LabelRejectedOption,
 } from "./label-policy";
+
+export { CachedCapabilitiesStore, filterByLimitsAndFields } from "./limits-filter";
+  LimitsDroppedCandidate,
+  LimitsEligibleCandidate,
+  LimitsFilterCandidate,
+  LimitsFilterInput,
+  LimitsFilterOptions,
+  LimitsFilterResult,
+  RouteAssetCapabilities,
+  Sep31InfoCacheOptions,
+  TransactionFieldSpec,
+} from "./limits-filter";

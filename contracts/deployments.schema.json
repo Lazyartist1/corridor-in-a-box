@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/corridor-in-a-box/corridor-in-a-box/blob/main/contracts/deployments.schema.json",
+  "title": "Contract deployments",
+  "description": "Shape of contracts/deployments.json: where the registry and attester are deployed and how each was upgraded.",
+  "type": "object",
+  "required": ["testnet", "public"],
+  "properties": {
+    "$comment": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "testnet": { "$ref": "#/$defs/network" },
+    "public": { "$ref": "#/$defs/network" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "contractId": {
+      "description": "A Soroban contract address (strkey, C...).",
+      "type": "string",
+      "pattern": "^C[A-Z2-7]{55}$"
+    },
+    "sha256Hex": {
+      "description": "A 32-byte hash as 64 lowercase hex characters.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "upgrade": {
+      "description": "One in-place upgrade() of a deployed contract.",
+      "type": "object",
+      "required": ["contract", "wasmHash", "txHash", "date"],
+      "properties": {
+        "contract": { "enum": ["registry", "attester"] },
+        "wasmHash": {
+          "description": "Hash of the wasm the contract runs after this upgrade.",
+          "$ref": "#/$defs/sha256Hex"
+        },
+        "txHash": {
+          "description": "Hash of the transaction that invoked upgrade().",
+          "$ref": "#/$defs/sha256Hex"
+        },
+        "date": {
+          "description": "UTC date the upgrade transaction closed.",
+          "type": "string",
+          "format": "date"
+        },
+        "ledger": {
+          "description": "Ledger sequence the upgrade transaction closed in.",
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "network": {
+      "type": "object",
+      "required": ["networkPassphrase", "rpcUrl", "registry", "attester"],
+      "properties": {
+        "networkPassphrase": { "type": "string", "minLength": 1 },
+        "rpcUrl": { "type": "string", "format": "uri" },
+        "registry": {
+          "description": "Null until the registry is deployed on this network.",
+          "oneOf": [{ "$ref": "#/$defs/contractId" }, { "type": "null" }]
+        },
+        "attester": {
+          "description": "Null until the attester is deployed on this network.",
+          "oneOf": [{ "$ref": "#/$defs/contractId" }, { "type": "null" }]
+        },
+        "deployedAt": {
+          "description": "UTC date of the first deployment. Required once a contract address is recorded.",
+          "type": "string",
+          "format": "date"
+        },
+        "wasm": {
+          "description": "Build output paths of the deployed contracts, relative to contracts/.",
+          "type": "object",
+          "properties": {
+            "registry": { "type": "string", "minLength": 1 },
+            "attester": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        },
+        "upgrades": {
+          "description": "Every upgrade() applied since deployment, oldest first.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/upgrade" }
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "description": "A network with a deployed contract records when it was deployed.",
+          "if": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": { "registry": { "type": "string" } },
+                "required": ["registry"]
+              },
+              {
+                "type": "object",
+                "properties": { "attester": { "type": "string" } },
+                "required": ["attester"]
+              }
+            ]
+          },
+          "then": {
+            "type": "object",
+            "properties": { "deployedAt": { "type": "string" } },
+            "required": ["deployedAt"]
+          }
+        },
+        {
+          "description": "A network with no deployed contract has no upgrades to record.",
+          "if": {
+            "type": "object",
+            "properties": { "registry": { "type": "null" }, "attester": { "type": "null" } }
+          },
+          "then": {
+            "type": "object",
+            "properties": { "upgrades": { "type": "array", "maxItems": 0 } }
+          }
+        }
+      ]
+    }
+  }
+}

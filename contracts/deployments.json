@@ -16,7 +16,23 @@
     "wasm": {
       "registry": "target/wasm32v1-none/release/corridor_registry.wasm",
       "attester": "target/wasm32v1-none/release/corridor_attester.wasm"
-    }
+    },
+    "upgrades": [
+      {
+        "contract": "registry",
+        "wasmHash": "2db79e0e0eb4e69c923bec6c87c514ce5c60434b0ca2930680660b83c3e88f9d",
+        "txHash": "6176da7f07245da2caba7fe28b5936b2e53ee30686ef45eb35b167381e44f09a",
+        "date": "2026-11-17",
+        "ledger": 5784930
+      },
+      {
+        "contract": "attester",
+        "wasmHash": "1334e4ae0677f343c69f719efe08a07467e5a69b4934f5fe44ef058f3d8978ba",
+        "txHash": "45ed384d375233c5e304d289cb31f35973f294cc7a849e03d4c940e8ca7da008",
+        "date": "2026-11-17",
+        "ledger": 5784938
+      }
+    ]
   },
   "public": {
     "networkPassphrase": "Public Global Stellar Network ; September 2015",

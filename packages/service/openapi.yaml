@@ -365,6 +365,19 @@ components:
         state: { $ref: "#/components/schemas/CorridorState" }
         transactionId: { type: string }
         stellarTxHash: { type: string }
+        route:
+          type: object
+          additionalProperties: false
+          required: [receivingDomain, protocol]
+          properties:
+            receivingDomain: { type: string }
+            protocol: { type: string }
+        price:
+          type: object
+          additionalProperties: false
+          required: [label]
+          properties:
+            label: { enum: [locked, indicative, estimated] }
         error:
           type: string
           description: The error code only, never its message.

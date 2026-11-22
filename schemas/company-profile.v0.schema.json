@@ -1,0 +1,263 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://corridor-in-a-box.org/schemas/company-profile.v0.schema.json",
+  "title": "Sending Business Company Profile (v0)",
+  "description": "Reusable onboarding pack describing a sending business for anchor KYB reviews. Referenced documents carry path, sha256, and date; binary files are never embedded.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "legalEntity",
+    "registrationNumbers",
+    "licences",
+    "ownership",
+    "amlCft",
+    "stellarAccounts",
+    "contacts",
+    "documentReferences"
+  ],
+  "$defs": {
+    "countryCode": {
+      "type": "string",
+      "pattern": "^[A-Z]{2}$",
+      "description": "ISO 3166-1 alpha-2 country or jurisdiction code."
+    },
+    "postalAddress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["line1", "city", "country"],
+      "properties": {
+        "line1": { "type": "string", "minLength": 1 },
+        "line2": { "type": "string", "minLength": 1 },
+        "city": { "type": "string", "minLength": 1 },
+        "region": { "type": "string", "minLength": 1 },
+        "postalCode": { "type": "string", "minLength": 1 },
+        "country": { "$ref": "#/$defs/countryCode" }
+      }
+    },
+    "documentRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "category", "path", "sha256", "date"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 },
+        "category": {
+          "type": "string",
+          "enum": [
+            "incorporation",
+            "licence",
+            "ownership",
+            "identity",
+            "aml_policy",
+            "address_proof",
+            "financials",
+            "other"
+          ]
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!data:)",
+          "description": "Relative path or external vault reference to the document; data URIs are forbidden."
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "Lowercase 64-character hex SHA-256 digest of the referenced file."
+        },
+        "date": {
+          "type": "string",
+          "format": "date",
+          "description": "ISO 8601 calendar date (YYYY-MM-DD) of document issuance or last verification."
+        }
+      }
+    }
+  },
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "0"
+    },
+    "legalEntity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "legalName",
+        "entityType",
+        "countryOfIncorporation",
+        "incorporatedAt",
+        "registeredAddress"
+      ],
+      "properties": {
+        "legalName": { "type": "string", "minLength": 1 },
+        "tradingName": { "type": "string", "minLength": 1 },
+        "entityType": { "type": "string", "minLength": 1 },
+        "countryOfIncorporation": { "$ref": "#/$defs/countryCode" },
+        "incorporatedAt": { "type": "string", "format": "date" },
+        "registeredAddress": { "$ref": "#/$defs/postalAddress" },
+        "operatingAddress": { "$ref": "#/$defs/postalAddress" },
+        "website": { "type": "string", "format": "uri" }
+      }
+    },
+    "registrationNumbers": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["country", "authority", "number"],
+        "properties": {
+          "country": { "$ref": "#/$defs/countryCode" },
+          "authority": { "type": "string", "minLength": 1 },
+          "number": { "type": "string", "minLength": 1 },
+          "issuedAt": { "type": "string", "format": "date" },
+          "documentRefId": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "licences": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["jurisdiction", "licenceType", "licenceNumber", "regulator", "status"],
+        "properties": {
+          "jurisdiction": { "$ref": "#/$defs/countryCode" },
+          "licenceType": { "type": "string", "minLength": 1 },
+          "licenceNumber": { "type": "string", "minLength": 1 },
+          "regulator": { "type": "string", "minLength": 1 },
+          "status": {
+            "type": "string",
+            "enum": ["active", "pending", "exempt", "expired", "revoked"]
+          },
+          "validUntil": { "type": "string", "format": "date" },
+          "documentRefId": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "ownership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["beneficialOwners", "directors"],
+      "properties": {
+        "beneficialOwners": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["fullName", "ownershipPercent", "nationality", "countryOfResidence"],
+            "properties": {
+              "fullName": { "type": "string", "minLength": 1 },
+              "ownershipPercent": { "type": "number", "minimum": 0, "maximum": 100 },
+              "nationality": { "$ref": "#/$defs/countryCode" },
+              "countryOfResidence": { "$ref": "#/$defs/countryCode" },
+              "isPep": { "type": "boolean" },
+              "role": { "type": "string", "minLength": 1 },
+              "documentRefId": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "directors": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["fullName", "role", "nationality", "countryOfResidence"],
+            "properties": {
+              "fullName": { "type": "string", "minLength": 1 },
+              "role": { "type": "string", "minLength": 1 },
+              "nationality": { "$ref": "#/$defs/countryCode" },
+              "countryOfResidence": { "$ref": "#/$defs/countryCode" },
+              "appointedAt": { "type": "string", "format": "date" },
+              "documentRefId": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "amlCft": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policyVersion",
+        "policyDate",
+        "complianceOfficer",
+        "sanctionsRegimes",
+        "transactionMonitoringSummary"
+      ],
+      "properties": {
+        "policyVersion": { "type": "string", "minLength": 1 },
+        "policyDate": { "type": "string", "format": "date" },
+        "complianceOfficer": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "title", "email"],
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "title": { "type": "string", "minLength": 1 },
+            "email": { "type": "string", "format": "email" },
+            "phone": { "type": "string", "minLength": 1 }
+          }
+        },
+        "screeningProviders": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "sanctionsRegimes": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "transactionMonitoringSummary": { "type": "string", "minLength": 1 },
+        "documentRefId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "stellarAccounts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["network", "publicKey", "purpose"],
+        "properties": {
+          "network": { "type": "string", "enum": ["public", "testnet"] },
+          "publicKey": {
+            "type": "string",
+            "pattern": "^G[A-Z2-7]{55}$"
+          },
+          "purpose": {
+            "type": "string",
+            "enum": ["settlement", "sep10_auth", "treasury", "distribution", "fee"]
+          },
+          "label": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "contacts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["role", "name", "email"],
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": ["primary", "compliance", "technical", "finance", "legal"]
+          },
+          "name": { "type": "string", "minLength": 1 },
+          "email": { "type": "string", "format": "email" },
+          "phone": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "documentReferences": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/documentRef" }
+    }
+  }
+}
