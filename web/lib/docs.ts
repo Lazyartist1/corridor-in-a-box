@@ -172,12 +172,14 @@ Body is a \`PaymentIntent\`:
 |---|---|---|
 | \`200\` | — | Payment completed successfully, run state returned, health check ok, or metrics rendered |
 | \`400\` | \`invalid payment body\`, \`invalid JSON\` | Malformed JSON or invalid \`PaymentIntent\` body structure |
+| \`400\` | \`ROUTE_OPTION_INVALID\` (\`INVALID_SIGNATURE\`) | The signed \`routeOption\` on \`POST /payments\` has a missing or wrong HMAC signature; nothing was started |
 | \`401\` | \`unauthorized\` | Missing or invalid Bearer API key |
 | \`403\` | \`KYC_REJECTED\` | Receiving anchor rejected customer KYC |
 | \`403\` | \`PRESETTLE_RECEIVER_NOT_ACCEPTED\` | The recipient's SEP-12 status is no longer ACCEPTED at the pre-settle gate; nothing was sent |
 | \`404\` | \`unknown corridor\`, \`not found\` | Unknown corridor ID, run key not found (or foreign tenant key), or unmatched route |
 | \`409\` | \`IDEMPOTENCY_CONFLICT\` | Replay with conflicting parameters or in-flight payment with same key |
 | \`409\` | \`QUOTE_EXPIRED\` | Anchor quote expired before settlement could begin |
+| \`409\` | \`ROUTE_OPTION_INVALID\` (\`EXPIRED\`) | The signed \`routeOption\`, or the locked quote it carries, has expired; ask for a fresh option |
 | \`409\` | \`KYC_REQUIRED\` | Customer KYC incomplete or customer action required |
 | \`409\` | \`PRESETTLE_TX_MISMATCH\` | The transaction the anchor opened is not what the engine was about to pay (amount, deposit account or memo); nothing was sent |
 | \`409\` | \`PRESETTLE_QUOTE_WINDOW\` | The firm quote would not survive settle and confirm; nothing was sent |
@@ -191,6 +193,7 @@ Body is a \`PaymentIntent\`:
 | \`422\` | \`PRESETTLE_INSUFFICIENT_FUNDS\` | The signer's balance cannot cover amount, fee and reserve; nothing was sent |
 | \`422\` | \`PRESETTLE_AMOUNT_OUT_OF_RANGE\` | Amount is outside the anchor's or manifest's min/max; nothing was sent |
 | \`422\` | \`CORRIDOR_UNPROVEN\` | Amount is above the canary cap on a lane that is not yet \`PROVEN\` |
+| \`422\` | \`ROUTE_OPTION_INVALID\` (\`MISMATCH\`, \`INVALID_LOCKED_QUOTE\`, \`UNCONFIGURED\`) | The signed \`routeOption\` does not match this payment (corridor, amount or receiving anchor), its locked quote is malformed, or the server has no \`CORRIDOR_ROUTE_OPTION_SECRET\` |
 | \`429\` | \`rate_limited\` | Token-bucket rate limit exceeded for client IP or API key |
 | \`500\` | \`SETTLEMENT_FAILED\` | On-chain Stellar payment transaction failed |
 | \`500\` | \`RECONCILE_MISMATCH\` | Settled amounts or assets do not match anchor transaction record |

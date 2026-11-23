@@ -15,7 +15,7 @@ import {
 } from "node:http";
 import * as crypto from "node:crypto";
 import type { Corridor } from "@corridor/manifest";
-import { execute, type EngineDeps } from "@corridor/engine";
+import { execute, type EngineDeps, type ExecuteOptions } from "@corridor/engine";
 import {
   constantTimeEqual,
   err,
@@ -254,6 +254,9 @@ export const STATUS_BY_CODE: Record<CorridorErrorCode, number> = {
   // like CORRIDOR_HALTED: a well-formed request refused because no trusted
   // route is available, not a fault in the caller's input or in this server.
   ROUTE_REFUSED: 503,
+  // Raised by the service before the engine runs. The response status follows the
+  // failed check (400 bad signature, 409 expired, 422 otherwise); 422 is the default.
+  ROUTE_OPTION_INVALID: 422,
 };
 
 /** Token-bucket rate limiter, keyed per client. In-memory; swap for Redis at scale. */
@@ -706,7 +709,10 @@ export function createService(options: ServiceOptions): Service {
       }
 
       const { routeOption, ...paymentIntent } = intent;
-      let effectiveDeps: EngineDeps = options.deps;
+      // A locked option carries the quote the sender was shown. It goes to the engine as
+      // ExecuteOptions.quote (#733), which honours it and refuses it once expired
+      // (QUOTE_EXPIRED) instead of re-quoting at a different rate.
+      let pinnedQuote: ExecuteOptions["quote"];
       if (routeOption !== undefined) {
         const verified = verifyRouteOption(routeOption, options.routeOptionSecret, {
           corridorId: paymentIntent.corridorId,
@@ -727,21 +733,14 @@ export function createService(options: ServiceOptions): Service {
         }
         if (verified.value.label === "locked" && verified.value.quote) {
           const pinned = verified.value.quote;
-          effectiveDeps = {
-            ...options.deps,
-            quoteProvider: {
-              source: "native",
-              quote: async () =>
-                ok({
-                  id: pinned.id,
-                  price: pinned.price,
-                  expiresAt: pinned.expiresAt,
-                  sourceAmount: pinned.sourceAmount,
-                  destAmount: pinned.destAmount,
-                  ...(pinned.fee ? { fee: pinned.fee } : {}),
-                  firm: true,
-                }),
-            },
+          pinnedQuote = {
+            id: pinned.id,
+            price: pinned.price,
+            expiresAt: pinned.expiresAt,
+            sourceAmount: pinned.sourceAmount,
+            destAmount: pinned.destAmount,
+            ...(pinned.fee ? { fee: pinned.fee } : {}),
+            firm: true,
           };
         }
       }
@@ -750,10 +749,11 @@ export function createService(options: ServiceOptions): Service {
       // must not be able to claim another tenant's runs by asking.
       // The request id travels with it: every log line and audit entry the run
       // produces is stamped with the same id this response echoes.
-      const p = execute(paymentIntent, corridor, effectiveDeps, {
+      const p = execute(paymentIntent, corridor, options.deps, {
         owner: presentedKey,
         requestId: ctx.requestId,
         ...(ctx.traceparent ? { traceparent: ctx.traceparent } : {}),
+        ...(pinnedQuote ? { quote: pinnedQuote } : {}),
       });
       trackExecution(intent.idempotencyKey, p);
       const result = await p;

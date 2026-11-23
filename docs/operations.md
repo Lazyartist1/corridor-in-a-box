@@ -596,6 +596,30 @@ The distribution account's seed is the highest-value secret; see
    auth still succeeds with the new account.
 5. Revoke the old key once no run references it.
 
+### The route-option secret and `ROUTE_OPTION_INVALID`
+
+A client can send the route the sender chose as a signed `routeOption` on
+`POST /payments`. The service checks its HMAC-SHA256 signature with
+`CORRIDOR_ROUTE_OPTION_SECRET` (`routeOptionSecret` in `createService`) before the
+engine starts. A locked option's quote is handed to the engine as the run's quote,
+so an expired one is refused rather than re-quoted. This key cannot move money, but
+whoever holds it can make the service accept an option it never issued, so keep it
+out of logs and out of the web bundle.
+
+Any failed check returns `ROUTE_OPTION_INVALID` with a `reason`, and no run starts:
+
+| Status | `reason`               | What to check                                                                  |
+| ------ | ---------------------- | ------------------------------------------------------------------------------ |
+| `422`  | `UNCONFIGURED`         | `CORRIDOR_ROUTE_OPTION_SECRET` is not set on this service                      |
+| `400`  | `INVALID_SIGNATURE`    | The option was signed with another key, or edited after signing                |
+| `409`  | `EXPIRED`              | The option or its locked quote expired; the client should fetch a fresh one    |
+| `422`  | `MISMATCH`             | The option names another corridor, amount or receiving anchor than the payment |
+| `422`  | `INVALID_LOCKED_QUOTE` | A `locked` option arrived without a usable quote                               |
+
+To rotate the secret, set the new value and restart. Options signed with the old key
+then fail with `INVALID_SIGNATURE`. They are short-lived, so a rotation only affects
+senders who were mid-checkout.
+
 ## 4. Database migrations
 
 The durable store needs two tables: `corridor_runs` (idempotency) and, if you

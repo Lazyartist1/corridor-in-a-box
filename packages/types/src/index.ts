@@ -69,7 +69,14 @@ export type CorridorErrorCode =
    * e.g. an unattested anchor. Fail closed: nothing was sent, a fresh run is
    * persisted as `failed`, and the key is spent. Not retryable.
    */
-  | "ROUTE_REFUSED";
+  | "ROUTE_REFUSED"
+  /**
+   * Service-level, never raised by the engine: the signed `routeOption` on
+   * `POST /payments` failed verification (bad or missing signature, expired,
+   * not matching the payment, or no `routeOptionSecret` configured). Nothing
+   * was started; the response's `reason` says which check failed.
+   */
+  | "ROUTE_OPTION_INVALID";
 
 /**
  * Returns true if the error code is a pre-settle gate check refusal.

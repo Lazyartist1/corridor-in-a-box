@@ -254,6 +254,9 @@ async function main(): Promise<void> {
     .map((k) => k.trim())
     .filter(Boolean);
   const rateLimitCapacity = process.env.CORRIDOR_RATELIMIT_CAPACITY;
+  // HMAC key for signed routeOption payloads on POST /payments. Unset, a submitted
+  // routeOption is refused with ROUTE_OPTION_INVALID (reason UNCONFIGURED).
+  const routeOptionSecret = process.env.CORRIDOR_ROUTE_OPTION_SECRET?.trim() || undefined;
 
   const service = createService({
     corridors,
@@ -265,6 +268,7 @@ async function main(): Promise<void> {
           refillPerSec: Number(process.env.CORRIDOR_RATELIMIT_REFILL_PER_SEC ?? "5"),
         }
       : undefined,
+    ...(routeOptionSecret ? { routeOptionSecret } : {}),
     metricsText: () => metrics.render(),
     // Wire the idempotency store check so /readyz reports store reachability.
     // PostgresIdempotencyStore has ping(); InMemoryIdempotencyStore does not —

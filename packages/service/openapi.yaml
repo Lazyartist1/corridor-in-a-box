@@ -104,12 +104,17 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/RunResult" }
         "400":
-          description: The body is not a valid payment. `field` names the offending input.
+          description: >-
+            The body is not a valid payment (`field` names the offending input), or its signed
+            routeOption carries a bad signature (ROUTE_OPTION_INVALID).
           headers:
             x-request-id: { $ref: "#/components/headers/RequestId" }
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/InvalidBody" }
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/InvalidBody" }
+                  - { $ref: "#/components/schemas/RouteOptionInvalid" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404":
           description: The corridor id is not served by this process.
@@ -265,6 +270,7 @@ components:
             oneOf:
               - { $ref: "#/components/schemas/EngineError" }
               - { $ref: "#/components/schemas/AmountInvalid" }
+              - { $ref: "#/components/schemas/RouteOptionInvalid" }
   schemas:
     Money:
       type: object
@@ -444,6 +450,7 @@ components:
         - CORRIDOR_HALTED
         - DRY_RUN_COMPLETE
         - ROUTE_REFUSED
+        - ROUTE_OPTION_INVALID
     EngineError:
       type: object
       required: [error, message]
@@ -458,6 +465,19 @@ components:
       properties:
         error: { const: AMOUNT_INVALID }
         field: { enum: [sourceAmount.amount, sourceAmount.asset] }
+        message: { type: string }
+    RouteOptionInvalid:
+      type: object
+      description: >-
+        The signed routeOption failed verification before any run started. 400 for a bad
+        signature, 409 once it has expired, 422 for every other reason.
+      required: [error, reason, field, message]
+      additionalProperties: false
+      properties:
+        error: { const: ROUTE_OPTION_INVALID }
+        reason:
+          { enum: [UNCONFIGURED, INVALID_SIGNATURE, EXPIRED, MISMATCH, INVALID_LOCKED_QUOTE] }
+        field: { const: routeOption }
         message: { type: string }
     InvalidBody:
       type: object

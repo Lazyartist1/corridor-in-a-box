@@ -40,6 +40,19 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it reache
   `RoutePlanner` (`packages/router/src/planner.ts`), matching the route planner interface sketch
   in `docs/rfcs/0004-smart-router.md` §1 with TSDoc on every type and field.
 
+### Added — the sender's chosen route on `POST /payments` ([#618](https://github.com/corridor-in-a-box/corridor-in-a-box/issues/618))
+
+- `POST /payments` accepts an optional HMAC-SHA256-signed `routeOption`: the corridor,
+  receiving anchor, protocol, price label and, for a `locked` option, the quote the sender
+  was shown. `signRouteOption()` / `verifyRouteOption()` are exported from
+  `@corridor/service`. The service verifies the option with `routeOptionSecret` (env
+  `CORRIDOR_ROUTE_OPTION_SECRET`, wired in `examples/run-service.ts`) and passes a locked
+  quote to the engine as `ExecuteOptions.quote` (#733), so an expired quote is refused
+  rather than re-quoted.
+- New error code `ROUTE_OPTION_INVALID`, with a `reason` of `UNCONFIGURED`,
+  `INVALID_SIGNATURE` (400), `EXPIRED` (409), `MISMATCH` or `INVALID_LOCKED_QUOTE` (422).
+  It is documented in the OpenAPI spec, the HTTP API docs page and `docs/operations.md`.
+
 ### Added — a custody statement ([#707](https://github.com/corridor-in-a-box/corridor-in-a-box/issues/707))
 
 - `docs/custody.md` says in one place that the project never holds funds or a key that can
