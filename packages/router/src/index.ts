@@ -224,6 +224,7 @@ export type {
 export {
   buildEstimatedOption,
   DEFAULT_ESTIMATE_MARGIN_BPS,
+  DEFAULT_MIN_ESTIMATE_SPAN_DAYS,
   DEFAULT_ESTIMATE_WINDOW_DAYS,
   DEFAULT_MIN_ESTIMATE_SAMPLES,
 } from "./estimated-price";

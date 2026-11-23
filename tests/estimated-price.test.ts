@@ -17,11 +17,11 @@ describe("buildEstimatedOption", () => {
   const nowMs = Date.UTC(2026, 10, 20, 9, 0, 0);
 
   it("computes P25 minus margin with exact BigInt math and populates price.basis", () => {
-    // 1912 samples inside 7d window (spaced every 5 minutes ~= 6.64 days)
+    // 1912 samples spread evenly across exactly 7 days (the default window and minimum span)
     const history: RateSample[] = Array.from({ length: 1912 }, (_, index) => ({
       // Rates cycle monotonically cleanly: quartile boundary falls cleanly on 100.00
       rate: index < 478 ? "99.00" : index < 956 ? "100.00" : "102.00",
-      timestampMs: nowMs - index * 5 * 60_000,
+      timestampMs: nowMs - Math.round((index * 7 * 86_400_000) / 1911),
     }));
     // Stale sample from 10 days ago should be excluded from default 7d window
     history.push({ rate: "50.00", timestampMs: nowMs - 10 * 86_400_000 });
@@ -39,19 +39,19 @@ describe("buildEstimatedOption", () => {
       throw new Error("Expected offered outcome");
     }
 
-    // p25Index = floor(0.25 * 1911) = 477 => 99.00; minus default 100 bps (1%) = 98.01
+    // p25Index = floor(0.25 * 1911) = 477 => 99.00; minus default 50 bps (0.5%) = 98.505
     expect(outcome.label).toBe("estimated");
     expect(outcome.price).toEqual({
       p25Rate: "99",
-      rate: "98.01",
-      marginBps: 100,
+      rate: "98.505",
+      marginBps: 50,
       windowDays: 7,
       sampleCount: 1912,
       basis: "P25 of 1,912 samples, 7d",
     });
     expect(outcome.estimatedDestAmount).toEqual({
       asset: "NGN",
-      amount: "24502.5",
+      amount: "24626.25",
     });
   });
 
@@ -69,9 +69,10 @@ describe("buildEstimatedOption", () => {
     expect(outcome).toEqual({
       status: "dropped",
       receivingDomain: "thin.example",
-      reason: "dropped: unpriceable (10 of 20 samples in 7d window)",
+      reason: "dropped: unpriceable (10 of 100 samples in 7d window)",
       sampleCount: 10,
-      minSamples: 20,
+      minSamples: 100,
+      minSpanDays: 7,
       windowDays: 7,
     });
   });
@@ -95,6 +96,7 @@ describe("buildEstimatedOption", () => {
         estimateWindowDays: 1,
         estimateMarginBps: 250,
         minEstimateSamples: 4,
+        minEstimateSpanDays: 0,
       },
       nowMs,
     });
@@ -127,6 +129,8 @@ describe("buildEstimatedOption", () => {
       policy: {
         estimateWindowDays: 7,
         estimateMarginBps: 0,
+        minEstimateSamples: 24,
+        minEstimateSpanDays: 4,
       },
       nowMs,
     });
@@ -136,6 +140,88 @@ describe("buildEstimatedOption", () => {
       expect(sevenDayOutcome.price.p25Rate).toBe("90");
       expect(sevenDayOutcome.price.sampleCount).toBe(24);
       expect(sevenDayOutcome.price.basis).toBe("P25 of 24 samples, 7d");
+    }
+  });
+
+  it("drops the candidate when enough samples cover less than the minimum span", () => {
+    // 150 samples, 30 minutes apart: plenty of samples, but only ~3.1 days of coverage.
+    const history = makeSamples(150, nowMs, 0.5, () => "1500.00");
+
+    const outcome = buildEstimatedOption({
+      receivingDomain: "short-span.example",
+      sourceAmount: { asset: "USDC", amount: "100" },
+      destAsset: "NGN",
+      history,
+      nowMs,
+    });
+
+    expect(outcome).toEqual({
+      status: "dropped",
+      receivingDomain: "short-span.example",
+      reason: "dropped: unpriceable (samples span 3.1d of 7d needed in 7d window)",
+      sampleCount: 150,
+      minSamples: 100,
+      minSpanDays: 7,
+      windowDays: 7,
+    });
+  });
+
+  it("offers a price at the RFC 0004 D3 defaults: 100 samples spanning 7 days, 50 bps margin", () => {
+    const history: RateSample[] = Array.from({ length: 100 }, (_, index) => ({
+      rate: "100.00",
+      timestampMs: nowMs - Math.round((index * 7 * 86_400_000) / 99),
+    }));
+
+    const outcome = buildEstimatedOption({
+      receivingDomain: "defaults.example",
+      sourceAmount: { asset: "USDC", amount: "10" },
+      destAsset: "NGN",
+      history,
+      nowMs,
+    });
+
+    expect(outcome.status).toBe("offered");
+    if (outcome.status === "offered") {
+      expect(outcome.price).toMatchObject({
+        p25Rate: "100",
+        rate: "99.5",
+        marginBps: 50,
+        windowDays: 7,
+        sampleCount: 100,
+      });
+    }
+  });
+
+  it("caps the required span at a shorter estimateWindowDays", () => {
+    const history: RateSample[] = Array.from({ length: 100 }, (_, index) => ({
+      rate: "100.00",
+      timestampMs: nowMs - Math.round((index * 86_400_000) / 99),
+    }));
+
+    const outcome = buildEstimatedOption({
+      receivingDomain: "one-day.example",
+      sourceAmount: { asset: "USDC", amount: "10" },
+      destAsset: "NGN",
+      history,
+      policy: { estimateWindowDays: 1 },
+      nowMs,
+    });
+
+    expect(outcome.status).toBe("offered");
+  });
+
+  it("rejects a negative or non-finite minEstimateSpanDays", () => {
+    for (const bad of [-1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() =>
+        buildEstimatedOption({
+          receivingDomain: "bad.example",
+          sourceAmount: { asset: "USDC", amount: "10" },
+          destAsset: "NGN",
+          history: [],
+          policy: { minEstimateSpanDays: bad },
+          nowMs,
+        }),
+      ).toThrow(RangeError);
     }
   });
 });

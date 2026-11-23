@@ -1,8 +1,9 @@
 import { isValidAmount, type Money } from "@corridor/types";
 
 export const DEFAULT_ESTIMATE_WINDOW_DAYS = 7;
-export const DEFAULT_ESTIMATE_MARGIN_BPS = 100;
-export const DEFAULT_MIN_ESTIMATE_SAMPLES = 20;
+export const DEFAULT_ESTIMATE_MARGIN_BPS = 50;
+export const DEFAULT_MIN_ESTIMATE_SAMPLES = 100;
+export const DEFAULT_MIN_ESTIMATE_SPAN_DAYS = 7;
 
 export interface RateSample {
   rate: string;
@@ -13,6 +14,8 @@ export interface EstimatedPricePolicy {
   estimateWindowDays?: number;
   estimateMarginBps?: number;
   minEstimateSamples?: number;
+  /** Minimum time the usable samples must cover; capped at `estimateWindowDays`. */
+  minEstimateSpanDays?: number;
 }
 
 export interface EstimatePriceRequest {
@@ -48,6 +51,7 @@ export interface EstimatedPriceDropped {
   reason: string;
   sampleCount: number;
   minSamples: number;
+  minSpanDays: number;
   windowDays: number;
 }
 
@@ -130,10 +134,17 @@ export function buildEstimatedOption(request: EstimatePriceRequest): EstimatedPr
     throw new RangeError("minEstimateSamples must be an integer >= 1");
   }
 
+  const minSpanDays = request.policy?.minEstimateSpanDays ?? DEFAULT_MIN_ESTIMATE_SPAN_DAYS;
+  if (!Number.isFinite(minSpanDays) || minSpanDays < 0) {
+    throw new RangeError("minEstimateSpanDays must be a number >= 0");
+  }
+  // A window shorter than the span could never satisfy it, so the window caps the requirement.
+  const requiredSpanDays = Math.min(minSpanDays, windowDays);
+
   const nowMs = request.nowMs ?? Date.now();
   const windowStartMs = nowMs - windowDays * 86_400_000;
 
-  const validSamples: Array<{ rate: string; parsed: ParsedDecimal }> = [];
+  const validSamples: Array<{ rate: string; parsed: ParsedDecimal; timestampMs: number }> = [];
   for (const sample of request.history) {
     if (
       !Number.isFinite(sample.timestampMs) ||
@@ -146,7 +157,7 @@ export function buildEstimatedOption(request: EstimatePriceRequest): EstimatedPr
     if (!parsed) {
       continue;
     }
-    validSamples.push({ rate: sample.rate.trim(), parsed });
+    validSamples.push({ rate: sample.rate.trim(), parsed, timestampMs: sample.timestampMs });
   }
 
   if (validSamples.length < minSamples) {
@@ -156,6 +167,22 @@ export function buildEstimatedOption(request: EstimatePriceRequest): EstimatedPr
       reason: `dropped: unpriceable (${formatCount(validSamples.length)} of ${formatCount(minSamples)} samples in ${windowDays}d window)`,
       sampleCount: validSamples.length,
       minSamples,
+      minSpanDays: requiredSpanDays,
+      windowDays,
+    };
+  }
+
+  const timestamps = validSamples.map((sample) => sample.timestampMs);
+  const spanMs = Math.max(...timestamps) - Math.min(...timestamps);
+  if (spanMs < requiredSpanDays * 86_400_000) {
+    const spanDays = Math.floor((spanMs / 86_400_000) * 10) / 10;
+    return {
+      status: "dropped",
+      receivingDomain: request.receivingDomain,
+      reason: `dropped: unpriceable (samples span ${spanDays.toFixed(1)}d of ${requiredSpanDays}d needed in ${windowDays}d window)`,
+      sampleCount: validSamples.length,
+      minSamples,
+      minSpanDays: requiredSpanDays,
       windowDays,
     };
   }

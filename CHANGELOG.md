@@ -40,6 +40,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it reache
   `RoutePlanner` (`packages/router/src/planner.ts`), matching the route planner interface sketch
   in `docs/rfcs/0004-smart-router.md` §1 with TSDoc on every type and field.
 
+### Changed — estimated-price defaults follow RFC 0004 D3 ([#610](https://github.com/corridor-in-a-box/corridor-in-a-box/issues/610))
+
+- `buildEstimatedOption` now defaults to a 50 bps margin (was 100) and drops a candidate unless it has
+  at least 100 samples (was 20) covering at least 7 days. The new `minEstimateSpanDays` policy field
+  sets the span; it is capped at `estimateWindowDays`. A dropped outcome now carries `minSpanDays`.
+
 ### Added — a custody statement ([#707](https://github.com/corridor-in-a-box/corridor-in-a-box/issues/707))
 
 - `docs/custody.md` says in one place that the project never holds funds or a key that can
