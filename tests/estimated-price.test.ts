@@ -143,8 +143,8 @@ describe("buildEstimatedOption", () => {
     }
   });
 
-  it("drops the candidate when enough samples cover less than the minimum span", () => {
-    // 150 samples, 30 minutes apart: plenty of samples, but only ~3.1 days of coverage.
+  it("drops the candidate when enough samples cover less than the minimum history", () => {
+    // 150 samples, 30 minutes apart: plenty of samples, but only ~3.1 days of history.
     const history = makeSamples(150, nowMs, 0.5, () => "1500.00");
 
     const outcome = buildEstimatedOption({
@@ -158,7 +158,7 @@ describe("buildEstimatedOption", () => {
     expect(outcome).toEqual({
       status: "dropped",
       receivingDomain: "short-span.example",
-      reason: "dropped: unpriceable (samples span 3.1d of 7d needed in 7d window)",
+      reason: "dropped: unpriceable (history covers 3.1d of 7d needed)",
       sampleCount: 150,
       minSamples: 100,
       minSpanDays: 7,
@@ -192,22 +192,83 @@ describe("buildEstimatedOption", () => {
     }
   });
 
-  it("caps the required span at a shorter estimateWindowDays", () => {
-    const history: RateSample[] = Array.from({ length: 100 }, (_, index) => ({
-      rate: "100.00",
-      timestampMs: nowMs - Math.round((index * 86_400_000) / 99),
-    }));
+  it("prices a realistic 15-minute series that does not start on the window edge, at the defaults", () => {
+    // A collector running for 30 days, sampling every 15 minutes, with the last sample taken
+    // 7 minutes ago: nothing sits exactly on the window start or on `now`. The in-window samples
+    // span about 6d 23h 45m, which the old in-window check rejected for every anchor.
+    const fifteenMin = 15 * 60_000;
+    const lastSampleMs = nowMs - 7 * 60_000;
+    const history: RateSample[] = Array.from(
+      { length: (30 * 86_400_000) / fifteenMin },
+      (_, i) => ({
+        rate: "100.00",
+        timestampMs: lastSampleMs - i * fifteenMin,
+      }),
+    );
 
     const outcome = buildEstimatedOption({
-      receivingDomain: "one-day.example",
+      receivingDomain: "collector.example",
       sourceAmount: { asset: "USDC", amount: "10" },
       destAsset: "NGN",
       history,
-      policy: { estimateWindowDays: 1 },
       nowMs,
     });
 
     expect(outcome.status).toBe("offered");
+    if (outcome.status === "offered") {
+      // 7 days of 15-minute samples inside the window: 672 of them, all well over the 100 minimum.
+      expect(outcome.price.sampleCount).toBe(672);
+      expect(outcome.price.rate).toBe("99.5");
+    }
+  });
+
+  it("measures the history over all supplied samples, not just the window", () => {
+    // A 1-day window: 100 samples in the last day, plus older samples reaching 8 days back.
+    const recent: RateSample[] = Array.from({ length: 100 }, (_, index) => ({
+      rate: "100.00",
+      timestampMs: nowMs - Math.round((index * 86_400_000) / 100),
+    }));
+    const older = makeSamples(8, nowMs - 86_400_000, 24, () => "100.00");
+    const request = {
+      receivingDomain: "one-day.example",
+      sourceAmount: { asset: "USDC", amount: "10" },
+      destAsset: "NGN",
+      policy: { estimateWindowDays: 1 },
+      nowMs,
+    } as const;
+
+    expect(buildEstimatedOption({ ...request, history: [...recent, ...older] }).status).toBe(
+      "offered",
+    );
+    // The same window with only one day of history behind it is dropped at the 7-day default.
+    expect(buildEstimatedOption({ ...request, history: recent })).toMatchObject({
+      status: "dropped",
+      reason: "dropped: unpriceable (history covers 0.9d of 7d needed)",
+    });
+  });
+
+  it("ignores unparseable and future samples when measuring the history", () => {
+    const inWindow: RateSample[] = Array.from({ length: 100 }, (_, index) => ({
+      rate: "100.00",
+      timestampMs: nowMs - Math.round((index * 3 * 86_400_000) / 99),
+    }));
+    const outcome = buildEstimatedOption({
+      receivingDomain: "junk.example",
+      sourceAmount: { asset: "USDC", amount: "10" },
+      destAsset: "NGN",
+      history: [
+        ...inWindow,
+        { rate: "not-a-rate", timestampMs: nowMs - 20 * 86_400_000 },
+        { rate: "0", timestampMs: nowMs - 20 * 86_400_000 },
+        { rate: "100.00", timestampMs: Number.NaN },
+      ],
+      nowMs,
+    });
+
+    expect(outcome).toMatchObject({
+      status: "dropped",
+      reason: "dropped: unpriceable (history covers 3.0d of 7d needed)",
+    });
   });
 
   it("rejects a negative or non-finite minEstimateSpanDays", () => {

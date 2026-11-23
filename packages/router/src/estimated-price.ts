@@ -14,7 +14,14 @@ export interface EstimatedPricePolicy {
   estimateWindowDays?: number;
   estimateMarginBps?: number;
   minEstimateSamples?: number;
-  /** Minimum time the usable samples must cover; capped at `estimateWindowDays`. */
+  /**
+   * How far back the supplied history must reach, in days: `now - oldest usable sample` across the
+   * whole history, not just the window (RFC 0004 §3: "at least 7 days of data and at least 100
+   * samples in the window"). Measuring it inside the window could never pass in practice: the
+   * in-window samples only span the full window when one sits exactly on its start, so a
+   * 15-minute collector would always fall short by one interval. `minEstimateSamples` is still
+   * counted inside the window. Not capped by `estimateWindowDays`.
+   */
   minEstimateSpanDays?: number;
 }
 
@@ -109,8 +116,9 @@ function formatCount(count: number): string {
 
 /**
  * Computes an estimated fallback option from historical rate samples inside the
- * configured window (P25 minus margin) or drops the candidate when sample
- * coverage falls below `minEstimateSamples`.
+ * configured window (P25 minus margin). Drops the candidate when the window holds
+ * fewer than `minEstimateSamples` usable samples, or when the whole history reaches
+ * back less than `minEstimateSpanDays` (now minus the oldest usable sample).
  */
 export function buildEstimatedOption(request: EstimatePriceRequest): EstimatedPriceOutcome {
   if (!isValidAmount(request.sourceAmount.amount)) {
@@ -138,23 +146,23 @@ export function buildEstimatedOption(request: EstimatePriceRequest): EstimatedPr
   if (!Number.isFinite(minSpanDays) || minSpanDays < 0) {
     throw new RangeError("minEstimateSpanDays must be a number >= 0");
   }
-  // A window shorter than the span could never satisfy it, so the window caps the requirement.
-  const requiredSpanDays = Math.min(minSpanDays, windowDays);
 
   const nowMs = request.nowMs ?? Date.now();
   const windowStartMs = nowMs - windowDays * 86_400_000;
 
   const validSamples: Array<{ rate: string; parsed: ParsedDecimal; timestampMs: number }> = [];
+  // The oldest usable sample in the whole history: how far back the data reaches.
+  let oldestMs = Number.POSITIVE_INFINITY;
   for (const sample of request.history) {
-    if (
-      !Number.isFinite(sample.timestampMs) ||
-      sample.timestampMs < windowStartMs ||
-      sample.timestampMs > nowMs
-    ) {
+    if (!Number.isFinite(sample.timestampMs) || sample.timestampMs > nowMs) {
       continue;
     }
     const parsed = parsePositiveDecimal(sample.rate);
     if (!parsed) {
+      continue;
+    }
+    oldestMs = Math.min(oldestMs, sample.timestampMs);
+    if (sample.timestampMs < windowStartMs) {
       continue;
     }
     validSamples.push({ rate: sample.rate.trim(), parsed, timestampMs: sample.timestampMs });
@@ -167,22 +175,22 @@ export function buildEstimatedOption(request: EstimatePriceRequest): EstimatedPr
       reason: `dropped: unpriceable (${formatCount(validSamples.length)} of ${formatCount(minSamples)} samples in ${windowDays}d window)`,
       sampleCount: validSamples.length,
       minSamples,
-      minSpanDays: requiredSpanDays,
+      minSpanDays,
       windowDays,
     };
   }
 
-  const timestamps = validSamples.map((sample) => sample.timestampMs);
-  const spanMs = Math.max(...timestamps) - Math.min(...timestamps);
-  if (spanMs < requiredSpanDays * 86_400_000) {
-    const spanDays = Math.floor((spanMs / 86_400_000) * 10) / 10;
+  // At least one usable sample is in the window here, so oldestMs is finite.
+  const historyMs = nowMs - oldestMs;
+  if (historyMs < minSpanDays * 86_400_000) {
+    const historyDays = Math.floor((historyMs / 86_400_000) * 10) / 10;
     return {
       status: "dropped",
       receivingDomain: request.receivingDomain,
-      reason: `dropped: unpriceable (samples span ${spanDays.toFixed(1)}d of ${requiredSpanDays}d needed in ${windowDays}d window)`,
+      reason: `dropped: unpriceable (history covers ${historyDays.toFixed(1)}d of ${minSpanDays}d needed)`,
       sampleCount: validSamples.length,
       minSamples,
-      minSpanDays: requiredSpanDays,
+      minSpanDays,
       windowDays,
     };
   }

@@ -43,8 +43,9 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it reache
 ### Changed — estimated-price defaults follow RFC 0004 D3 ([#610](https://github.com/corridor-in-a-box/corridor-in-a-box/issues/610))
 
 - `buildEstimatedOption` now defaults to a 50 bps margin (was 100) and drops a candidate unless it has
-  at least 100 samples (was 20) covering at least 7 days. The new `minEstimateSpanDays` policy field
-  sets the span; it is capped at `estimateWindowDays`. A dropped outcome now carries `minSpanDays`.
+  at least 100 samples (was 20) in the window and at least 7 days of history. The new
+  `minEstimateSpanDays` policy field sets that minimum, measured as now minus the oldest usable
+  sample across the whole history, not inside the window. A dropped outcome now carries `minSpanDays`.
 
 ### Added — a custody statement ([#707](https://github.com/corridor-in-a-box/corridor-in-a-box/issues/707))
 
