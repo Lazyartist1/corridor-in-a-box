@@ -337,6 +337,20 @@ const ALPHA3_TO_ALPHA2: Readonly<Record<string, string>> = Object.freeze({
   PRI: "PR",
 });
 
+const ALPHA2_TO_ALPHA3: Readonly<Record<string, string>> = Object.freeze(
+  Object.fromEntries(Object.entries(ALPHA3_TO_ALPHA2).map(([a3, a2]) => [a2, a3])),
+);
+
+/**
+ * The ISO-3166-1 alpha-3 code for an alpha-2 code in the table above, or
+ * `undefined` for one it does not hold. SEP-9 encodes countries as alpha-3,
+ * while profiles and manifests carry alpha-2, so exporters convert with this
+ * and leave a field out rather than send a code they cannot vouch for.
+ */
+export function toAlpha3(alpha2: string): string | undefined {
+  return ALPHA2_TO_ALPHA3[alpha2.trim().toUpperCase()];
+}
+
 const ALPHA2 = new Set<string>(Object.values(TO_ALPHA2));
 
 /** The tail of an address line, as a key into the tables above. */

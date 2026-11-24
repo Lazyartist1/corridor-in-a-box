@@ -4,7 +4,7 @@
 // absence of a claim, and the two have to stay distinguishable.
 
 import { describe, expect, it } from "vitest";
-import { declaredCountry, probeAnchor, toAlpha2 } from "@corridor/probe";
+import { declaredCountry, probeAnchor, toAlpha2, toAlpha3 } from "@corridor/probe";
 
 /** A stellar.toml whose only content is a DOCUMENTATION address line. */
 const tomlWithAddress = (address: string, quote = '"') =>
@@ -88,6 +88,22 @@ describe("toAlpha2", () => {
     expect(toAlpha2("Lagos")).toBeUndefined();
     expect(toAlpha2("XYZ")).toBeUndefined();
     expect(toAlpha2("Nigeria, Ghana")).toBeUndefined();
+  });
+});
+
+describe("toAlpha3", () => {
+  it("converts the alpha-2 codes the table holds, and round-trips with toAlpha2", () => {
+    expect(toAlpha3("GB")).toBe("GBR");
+    expect(toAlpha3(" ng ")).toBe("NGA");
+    for (const alpha2 of ["NG", "KE", "ZA", "MX", "US", "PL", "DE", "FR"]) {
+      expect(toAlpha2(toAlpha3(alpha2)!)).toBe(alpha2);
+    }
+  });
+
+  it("returns undefined for a code it does not hold", () => {
+    expect(toAlpha3("ZZ")).toBeUndefined();
+    expect(toAlpha3("")).toBeUndefined();
+    expect(toAlpha3("GBR")).toBeUndefined();
   });
 });
 

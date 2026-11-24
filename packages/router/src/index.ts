@@ -223,7 +223,6 @@ export type {
 
 export {
   buildEstimatedOption,
-  DEFAULT_ESTIMATE_MARGIN_BPS,
   DEFAULT_MIN_ESTIMATE_SPAN_DAYS,
   DEFAULT_ESTIMATE_WINDOW_DAYS,
   DEFAULT_MIN_ESTIMATE_SAMPLES,
@@ -237,3 +236,15 @@ export type {
   EstimatePriceRequest,
   RateSample,
 } from "./estimated-price";
+export {
+  DEFAULT_ESTIMATE_MARGIN_BPS,
+  applyEstimateMargin,
+  fetchIndicativePrice,
+} from "./indicative-price";
+export type { IndicativePriceRequest, IndicativeRouteOption } from "./indicative-price";
+export { PinnedRouteResolver, UnpinnedRouteError } from "./pinned-resolver";
+export type {
+  PinnedRouteResolverOptions,
+  PinnedRunRecord,
+  PinnedRunStore,
+} from "./pinned-resolver";

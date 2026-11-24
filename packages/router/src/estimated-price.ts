@@ -1,7 +1,9 @@
 import { isValidAmount, type Money } from "@corridor/types";
+import { DEFAULT_ESTIMATE_MARGIN_BPS } from "./indicative-price";
 
 export const DEFAULT_ESTIMATE_WINDOW_DAYS = 7;
-export const DEFAULT_ESTIMATE_MARGIN_BPS = 50;
+/** Default ranking discount for estimated prices: 50 bps (RFC 0004 D3), shared with indicative prices. */
+export { DEFAULT_ESTIMATE_MARGIN_BPS };
 export const DEFAULT_MIN_ESTIMATE_SAMPLES = 100;
 export const DEFAULT_MIN_ESTIMATE_SPAN_DAYS = 7;
 
